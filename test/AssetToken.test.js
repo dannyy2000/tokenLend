@@ -27,7 +27,7 @@ describe("AssetToken", function () {
     describe("Minting Assets", function () {
         it("Should mint asset with correct metadata", async function () {
             const assetType = "phone";
-            const aiValuation = ethers.parseUnits("500", 18); // $500
+            const aiValuation = ethers.utils.parseUnits("500", 18); // $500
             const maxLTV = 7000; // 70%
             const tokenURI = "ipfs://QmTest123";
 
@@ -58,7 +58,7 @@ describe("AssetToken", function () {
                 assetToken.connect(borrower).mintAsset(
                     borrower.address,
                     "phone",
-                    ethers.parseUnits("500", 18),
+                    ethers.utils.parseUnits("500", 18),
                     7000,
                     "ipfs://test"
                 )
@@ -68,9 +68,9 @@ describe("AssetToken", function () {
         it("Should fail with invalid borrower address", async function () {
             await expect(
                 assetToken.mintAsset(
-                    ethers.ZeroAddress,
+                    ethers.constants.AddressZero,
                     "phone",
-                    ethers.parseUnits("500", 18),
+                    ethers.utils.parseUnits("500", 18),
                     7000,
                     "ipfs://test"
                 )
@@ -88,7 +88,7 @@ describe("AssetToken", function () {
                 assetToken.mintAsset(
                     borrower.address,
                     "phone",
-                    ethers.parseUnits("500", 18),
+                    ethers.utils.parseUnits("500", 18),
                     0,
                     "ipfs://test"
                 )
@@ -98,7 +98,7 @@ describe("AssetToken", function () {
                 assetToken.mintAsset(
                     borrower.address,
                     "phone",
-                    ethers.parseUnits("500", 18),
+                    ethers.utils.parseUnits("500", 18),
                     10001,
                     "ipfs://test"
                 )
@@ -115,7 +115,7 @@ describe("AssetToken", function () {
             await assetToken.mintAsset(
                 borrower.address,
                 "phone",
-                ethers.parseUnits("500", 18),
+                ethers.utils.parseUnits("500", 18),
                 7000,
                 "ipfs://test"
             );
@@ -180,13 +180,13 @@ describe("AssetToken", function () {
 
     describe("Max Loan Amount", function () {
         it("Should calculate correct max loan amount", async function () {
-            const aiValuation = ethers.parseUnits("1000", 18); // $1000
+            const aiValuation = ethers.utils.parseUnits("1000", 18); // $1000
             const maxLTV = 7000; // 70%
 
             await assetToken.mintAsset(borrower.address, "car", aiValuation, maxLTV, "ipfs://test");
 
             const maxLoan = await assetToken.getMaxLoanAmount(0);
-            const expected = (aiValuation * BigInt(maxLTV)) / BigInt(10000);
+            const expected = aiValuation.mul(maxLTV).div(10000);
 
             expect(maxLoan).to.equal(expected); // $700
         });
@@ -198,7 +198,7 @@ describe("AssetToken", function () {
             await assetToken.mintAsset(
                 borrower.address,
                 "phone",
-                ethers.parseUnits("500", 18),
+                ethers.utils.parseUnits("500", 18),
                 7000,
                 "ipfs://test"
             );

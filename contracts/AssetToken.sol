@@ -46,7 +46,7 @@ contract AssetToken is ERC721, ERC721URIStorage, Ownable {
         string memory assetType,
         uint256 aiValuation,
         uint256 maxLTV,
-        string memory tokenURI
+        string memory uri
     ) external onlyOwner returns (uint256) {
         require(borrower != address(0), "Invalid borrower address");
         require(aiValuation > 0, "Valuation must be greater than 0");
@@ -55,7 +55,7 @@ contract AssetToken is ERC721, ERC721URIStorage, Ownable {
         uint256 tokenId = _nextTokenId++;
 
         _safeMint(borrower, tokenId);
-        _setTokenURI(tokenId, tokenURI);
+        _setTokenURI(tokenId, uri);
 
         assets[tokenId] = Asset({
             assetType: assetType,
