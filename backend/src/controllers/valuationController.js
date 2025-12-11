@@ -3,6 +3,8 @@ const pricingService = require('../services/pricingService');
 const ltvCalculator = require('../services/ltvCalculator');
 const { calculateAge } = require('../utils/dateUtils');
 const { calculateAdjustedValue } = require('../utils/depreciation');
+const Valuation = require('../models/Valuation');
+const User = require('../models/User');
 const crypto = require('crypto');
 
 /**
@@ -18,9 +20,11 @@ async function createValuation(req, res) {
       variant,
       purchaseDate,
       serialNumber,
-      images,  // Array of image URLs
-      userId
+      images  // Array of image URLs
     } = req.body;
+
+    // Use authenticated user ID if available, otherwise null
+    const userId = req.userId || req.body.userId || null;
 
     // Validate required fields
     if (!assetType || !brand || !model || !purchaseDate || !images || images.length === 0) {
@@ -149,9 +153,79 @@ async function createValuation(req, res) {
 
     console.log('✅ Valuation completed successfully!\n');
 
-    // TODO: Save to database (MongoDB)
-    // const valuation = new Valuation({ valuationId, userId, ...data });
-    // await valuation.save();
+    // Save to database
+    try {
+      const valuationDoc = new Valuation({
+        valuationId,
+        userId: userId || null, // Optional - can be used without auth for testing
+        input: {
+          assetType,
+          brand,
+          model,
+          variant,
+          purchaseDate: new Date(purchaseDate),
+          serialNumber,
+          images,
+          userCondition: req.body.condition
+        },
+        aiAssessment: {
+          detectedModel: aiAssessment.detectedModel,
+          detectedBrand: aiAssessment.detectedBrand,
+          matchConfidence: aiAssessment.confidence,
+          conditionScore: aiAssessment.conditionScore,
+          physicalCondition: aiAssessment.physicalCondition,
+          damageNotes: aiAssessment.damageNotes || [],
+          redFlags: aiAssessment.redFlags || [],
+          isStockPhoto: aiAssessment.isStockPhoto || false,
+          gptConfidence: aiAssessment.confidence
+        },
+        valuation: {
+          originalPrice: valuation.originalPrice,
+          currentMarketValue: valuation.currentMarketValue,
+          depreciatedValue: valuation.depreciatedValue,
+          conditionAdjustedValue: valuation.conditionAdjustedValue,
+          currency: valuation.currency
+        },
+        ltvCalculation: {
+          baseLTV: ltvResult.baseLTV,
+          conditionMultiplier: aiAssessment.conditionScore,
+          ageMultiplier: ltvResult.ageMultiplier,
+          liquidityMultiplier: ltvResult.liquidityMultiplier,
+          finalLTV: ltvResult.finalLTV,
+          maxLoanAmount: maxLoanAmount
+        },
+        loanTerms: {
+          maxLTV: ltvResult.ltvBasisPoints,
+          maxLoanAmount: maxLoanAmount,
+          recommendedDuration: recommendedTerms.recommendedDuration,
+          recommendedRate: recommendedTerms.recommendedInterestRate
+        },
+        riskAssessment: {
+          assetLiquidity: asset.liquidity,
+          marketDemand: asset.marketDemand,
+          overallRisk: ltvResult.finalLTV < 0.4 ? 'low' : ltvResult.finalLTV < 0.6 ? 'medium' : 'high'
+        },
+        status: 'pending',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+      });
+
+      await valuationDoc.save();
+      console.log('💾 Valuation saved to database');
+
+      // Increment user valuation count if userId provided
+      if (userId) {
+        try {
+          await User.findByIdAndUpdate(userId, {
+            $inc: { 'stats.totalValuations': 1 }
+          });
+        } catch (err) {
+          console.log('⚠️  Could not update user stats:', err.message);
+        }
+      }
+    } catch (dbError) {
+      console.error('⚠️  Database save failed:', dbError.message);
+      // Don't fail the request if database save fails - return the valuation anyway
+    }
 
     res.status(200).json(response);
 
@@ -173,16 +247,72 @@ async function getValuation(req, res) {
   try {
     const { valuationId } = req.params;
 
-    // TODO: Fetch from database
-    // const valuation = await Valuation.findOne({ valuationId });
+    // Fetch from database
+    const valuation = await Valuation.findOne({ valuationId });
 
-    res.status(501).json({
-      success: false,
-      message: 'Get valuation endpoint not yet implemented',
-      note: 'Database integration pending'
+    if (!valuation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Valuation not found'
+      });
+    }
+
+    // Check if valuation is expired and update status
+    if (valuation.isExpired() && valuation.status === 'pending') {
+      valuation.status = 'expired';
+      await valuation.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        valuation: {
+          valuationId: valuation.valuationId,
+          userId: valuation.userId,
+          asset: {
+            type: valuation.input.assetType,
+            brand: valuation.input.brand,
+            model: valuation.input.model,
+            variant: valuation.input.variant,
+            detectedModel: valuation.aiAssessment.detectedModel,
+            confirmedMatch: valuation.aiAssessment.detectedModel === valuation.input.model
+          },
+          valuation: valuation.valuation,
+          condition: {
+            rating: valuation.aiAssessment.physicalCondition,
+            score: valuation.aiAssessment.conditionScore,
+            notes: valuation.aiAssessment.damageNotes,
+            confidence: valuation.aiAssessment.gptConfidence,
+            redFlags: valuation.aiAssessment.redFlags
+          },
+          loanTerms: {
+            maxLTV: valuation.loanTerms.maxLTV,
+            maxLTVPercent: `${(valuation.loanTerms.maxLTV / 100).toFixed(2)}%`,
+            maxLoanAmount: valuation.loanTerms.maxLoanAmount,
+            recommendedDuration: valuation.loanTerms.recommendedDuration,
+            recommendedRate: valuation.loanTerms.recommendedRate
+          },
+          riskBreakdown: {
+            baseLTV: `${(valuation.ltvCalculation.baseLTV * 100).toFixed(2)}%`,
+            conditionAdjustment: `${(valuation.ltvCalculation.conditionMultiplier * 100).toFixed(2)}%`,
+            ageAdjustment: `${(valuation.ltvCalculation.ageMultiplier * 100).toFixed(2)}%`,
+            liquidityAdjustment: `${(valuation.ltvCalculation.liquidityMultiplier * 100).toFixed(2)}%`,
+            finalLTV: `${(valuation.ltvCalculation.finalLTV * 100).toFixed(2)}%`
+          },
+          riskAssessment: valuation.riskAssessment,
+          status: valuation.status,
+          usedForLoan: valuation.usedForLoan,
+          loanId: valuation.loanId,
+          assetTokenId: valuation.assetTokenId,
+          isValid: valuation.isValid,
+          createdAt: valuation.createdAt,
+          expiresAt: valuation.expiresAt
+        }
+      }
     });
 
   } catch (error) {
+    console.error('Get valuation error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to get valuation',
@@ -198,17 +328,85 @@ async function getValuation(req, res) {
 async function getUserValuations(req, res) {
   try {
     const { userId } = req.params;
+    const { status, limit = 50, page = 1 } = req.query;
 
-    // TODO: Fetch from database
-    // const valuations = await Valuation.find({ userId });
+    // Build query
+    const query = { userId };
 
-    res.status(501).json({
-      success: false,
-      message: 'Get user valuations endpoint not yet implemented',
-      note: 'Database integration pending'
+    // Filter by status if provided
+    if (status) {
+      query.status = status;
+    }
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Fetch valuations from database
+    const valuations = await Valuation.find(query)
+      .sort({ createdAt: -1 }) // Most recent first
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    // Get total count for pagination
+    const totalCount = await Valuation.countDocuments(query);
+
+    // Auto-expire old valuations
+    await Valuation.expireOldValuations();
+
+    // Format response
+    const formattedValuations = valuations.map(v => ({
+      valuationId: v.valuationId,
+      asset: {
+        type: v.input.assetType,
+        brand: v.input.brand,
+        model: v.input.model,
+        variant: v.input.variant,
+        images: v.input.images
+      },
+      valuation: {
+        currentMarketValue: v.valuation.currentMarketValue,
+        conditionAdjustedValue: v.valuation.conditionAdjustedValue,
+        currency: v.valuation.currency
+      },
+      condition: {
+        rating: v.aiAssessment.physicalCondition,
+        score: v.aiAssessment.conditionScore
+      },
+      loanTerms: {
+        maxLTV: v.loanTerms.maxLTV,
+        maxLTVPercent: `${(v.loanTerms.maxLTV / 100).toFixed(2)}%`,
+        maxLoanAmount: v.loanTerms.maxLoanAmount
+      },
+      status: v.status,
+      usedForLoan: v.usedForLoan,
+      loanId: v.loanId,
+      assetTokenId: v.assetTokenId,
+      isValid: v.isValid,
+      createdAt: v.createdAt,
+      expiresAt: v.expiresAt
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: {
+        valuations: formattedValuations,
+        pagination: {
+          total: totalCount,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(totalCount / parseInt(limit))
+        },
+        summary: {
+          total: totalCount,
+          pending: await Valuation.countDocuments({ userId, status: 'pending' }),
+          used: await Valuation.countDocuments({ userId, status: 'used_for_loan' }),
+          expired: await Valuation.countDocuments({ userId, status: 'expired' })
+        }
+      }
     });
 
   } catch (error) {
+    console.error('Get user valuations error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to get user valuations',
@@ -217,8 +415,104 @@ async function getUserValuations(req, res) {
   }
 }
 
+/**
+ * Get all valuations for the authenticated user
+ * GET /api/valuations/me
+ */
+async function getMyValuations(req, res) {
+  try {
+    // req.userId is set by authenticate middleware
+    const userId = req.userId;
+    const { status, limit = 50, page = 1 } = req.query;
+
+    // Build query
+    const query = { userId };
+
+    // Filter by status if provided
+    if (status) {
+      query.status = status;
+    }
+
+    // Calculate pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Fetch valuations from database
+    const valuations = await Valuation.find(query)
+      .sort({ createdAt: -1 }) // Most recent first
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    // Get total count for pagination
+    const totalCount = await Valuation.countDocuments(query);
+
+    // Auto-expire old valuations
+    await Valuation.expireOldValuations();
+
+    // Format response
+    const formattedValuations = valuations.map(v => ({
+      valuationId: v.valuationId,
+      asset: {
+        type: v.input.assetType,
+        brand: v.input.brand,
+        model: v.input.model,
+        variant: v.input.variant,
+        images: v.input.images
+      },
+      valuation: {
+        currentMarketValue: v.valuation.currentMarketValue,
+        conditionAdjustedValue: v.valuation.conditionAdjustedValue,
+        currency: v.valuation.currency
+      },
+      condition: {
+        rating: v.aiAssessment.physicalCondition,
+        score: v.aiAssessment.conditionScore
+      },
+      loanTerms: {
+        maxLTV: v.loanTerms.maxLTV,
+        maxLTVPercent: `${(v.loanTerms.maxLTV / 100).toFixed(2)}%`,
+        maxLoanAmount: v.loanTerms.maxLoanAmount
+      },
+      status: v.status,
+      usedForLoan: v.usedForLoan,
+      loanId: v.loanId,
+      assetTokenId: v.assetTokenId,
+      isValid: v.isValid,
+      createdAt: v.createdAt,
+      expiresAt: v.expiresAt
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: {
+        valuations: formattedValuations,
+        pagination: {
+          total: totalCount,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(totalCount / parseInt(limit))
+        },
+        summary: {
+          total: totalCount,
+          pending: await Valuation.countDocuments({ userId, status: 'pending' }),
+          used: await Valuation.countDocuments({ userId, status: 'used_for_loan' }),
+          expired: await Valuation.countDocuments({ userId, status: 'expired' })
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get my valuations error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get your valuations',
+      error: error.message
+    });
+  }
+}
+
 module.exports = {
   createValuation,
   getValuation,
-  getUserValuations
+  getUserValuations,
+  getMyValuations
 };

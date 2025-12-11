@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 // Import routes
+const authRoutes = require('./src/routes/auth.routes');
 const valuationRoutes = require('./src/routes/valuation.routes');
 const assetRoutes = require('./src/routes/asset.routes');
 
@@ -40,6 +41,7 @@ app.get('/health', (req, res) => {
 });
 
 // API Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/valuations', valuationRoutes);
 app.use('/api/assets', assetRoutes);
 
