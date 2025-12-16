@@ -11,11 +11,11 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         const baseStyles = 'inline-flex items-center justify-center rounded-xl font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50';
 
         const variants = {
-            default: 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 shadow-lg shadow-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/40',
-            secondary: 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700 shadow-lg shadow-purple-500/30',
-            outline: 'border-2 border-indigo-500/50 bg-transparent hover:bg-indigo-500/10 text-indigo-400',
-            ghost: 'hover:bg-white/10 text-gray-300',
-            destructive: 'bg-red-600 text-white hover:bg-red-700',
+            default: 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-500 hover:to-purple-500 shadow-lg hover:shadow-xl transition-all duration-200',
+            secondary: 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-500 hover:to-pink-500 shadow-lg hover:shadow-xl transition-all duration-200',
+            outline: 'border-2 border-indigo-500 bg-transparent hover:bg-indigo-500/10 text-indigo-400 hover:text-indigo-300 transition-all duration-200',
+            ghost: 'hover:bg-slate-700/50 text-gray-300 hover:text-white transition-all duration-200',
+            destructive: 'bg-red-600 text-white hover:bg-red-500 shadow-lg hover:shadow-xl transition-all duration-200',
         };
 
         const sizes = {

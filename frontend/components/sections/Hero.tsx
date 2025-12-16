@@ -8,10 +8,10 @@ import { motion } from 'framer-motion';
 export function Hero() {
     return (
         <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-16">
-            {/* Animated background elements */}
+            {/* Subtle background elements */}
             <div className="absolute inset-0 overflow-hidden">
-                <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/20 rounded-full blur-3xl animate-pulse-glow" />
-                <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/20 rounded-full blur-3xl animate-pulse-glow animation-delay-1000" />
+                <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl" />
+                <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl" />
             </div>
 
             <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-32 text-center">
@@ -21,20 +21,20 @@ export function Hero() {
                     transition={{ duration: 0.8 }}
                 >
                     {/* Badge */}
-                    <div className="inline-flex items-center space-x-2 glass-card px-4 py-2 mb-8">
-                        <Sparkles className="w-4 h-4 text-yellow-400" />
-                        <span className="text-sm text-gray-300">AI-Powered Asset Valuation</span>
+                    <div className="inline-flex items-center gap-2 glass-card px-5 py-2.5 mb-8">
+                        <Sparkles className="w-4 h-4 text-indigo-400" />
+                        <span className="text-sm text-gray-300 font-medium tracking-wide">AI-Powered Asset Valuation</span>
                     </div>
 
                     {/* Main heading */}
-                    <h1 className="text-5xl md:text-7xl font-bold mb-6">
+                    <h1 className="text-5xl md:text-7xl font-bold mb-8 leading-tight">
                         Unlock Liquidity from
                         <br />
                         <span className="gradient-text">Your Real-World Assets</span>
                     </h1>
 
                     {/* Subheading */}
-                    <p className="text-xl md:text-2xl text-gray-400 mb-12 max-w-3xl mx-auto">
+                    <p className="text-xl md:text-2xl text-gray-400 mb-12 max-w-3xl mx-auto leading-relaxed">
                         Get instant loans backed by your phones, laptops, cars, and more.
                         AI-powered valuations ensure fair terms for borrowers and lenders.
                     </p>
@@ -56,17 +56,17 @@ export function Hero() {
 
                     {/* Trust indicators */}
                     <div className="mt-16 flex flex-wrap items-center justify-center gap-8 text-sm text-gray-500">
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center gap-2.5">
                             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                            <span>Secured by Smart Contracts</span>
+                            <span className="font-medium">Secured by Smart Contracts</span>
                         </div>
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center gap-2.5">
                             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                            <span>AI-Verified Assets</span>
+                            <span className="font-medium">AI-Verified Assets</span>
                         </div>
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center gap-2.5">
                             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                            <span>Built on Mantle</span>
+                            <span className="font-medium">Built on Mantle</span>
                         </div>
                     </div>
                 </motion.div>

@@ -8,9 +8,9 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 const Card = React.forwardRef<HTMLDivElement, CardProps>(
     ({ className, variant = 'default', ...props }, ref) => {
         const variants = {
-            default: 'bg-slate-900/50 border border-slate-800',
-            glass: 'glass-card',
-            gradient: 'bg-gradient-to-br from-indigo-900/30 to-purple-900/30 border border-indigo-500/20',
+            default: 'bg-slate-800/50 border border-slate-700/50 hover-lift',
+            glass: 'glass-card hover-lift',
+            gradient: 'bg-gradient-to-br from-indigo-900/20 to-purple-900/20 border border-indigo-500/20 hover-lift',
         };
 
         return (
@@ -29,7 +29,7 @@ const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
     ({ className, ...props }, ref) => (
         <div
             ref={ref}
-            className={cn('flex flex-col space-y-1.5 pb-4', className)}
+            className={cn('flex flex-col space-y-3 pb-6', className)}
             {...props}
         />
     )
@@ -41,7 +41,7 @@ const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HT
     ({ className, ...props }, ref) => (
         <h3
             ref={ref}
-            className={cn('text-2xl font-bold tracking-tight text-white', className)}
+            className={cn('text-2xl font-bold text-white leading-tight', className)}
             {...props}
         />
     )
@@ -53,7 +53,7 @@ const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttribu
     ({ className, ...props }, ref) => (
         <p
             ref={ref}
-            className={cn('text-sm text-gray-400', className)}
+            className={cn('text-sm text-gray-400 leading-relaxed', className)}
             {...props}
         />
     )
