@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -11,7 +11,10 @@ import { LoadingButton } from '@/components/ui/Spinner';
 import { formatCurrency, formatDate } from '@/lib/utils/format';
 import { TrendingUp, Wallet, DollarSign, AlertCircle, CheckCircle2, Clock, Eye } from 'lucide-react';
 import Link from 'next/link';
-import { useAccount } from 'wagmi';
+import { useAccount, useChainId } from 'wagmi';
+import { useFundLoan } from '@/lib/hooks';
+import { getDefaultStablecoin, getStablecoinDecimals } from '@/lib/contracts';
+import { parseUnits } from 'viem';
 
 interface LoanRequest {
     id: string;
@@ -44,10 +47,23 @@ interface FundedLoan {
 
 export function LenderDashboard() {
     const { address, isConnected } = useAccount();
+    const chainId = useChainId();
     const { toast, toasts, removeToast } = useToast();
     const [selectedLoan, setSelectedLoan] = useState<LoanRequest | null>(null);
     const [isFundModalOpen, setIsFundModalOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const [fundingStep, setFundingStep] = useState<'approve' | 'fund'>('approve');
+
+    // Real blockchain hook
+    const {
+        approveStablecoin,
+        fundLoan,
+        isPending,
+        isConfirming,
+        isSuccess,
+        hash,
+        error,
+    } = useFundLoan();
 
     // Mock data - in production, fetch from smart contracts
     const mockAvailableLoans: LoanRequest[] = [
@@ -155,17 +171,55 @@ export function LenderDashboard() {
         setIsFundModalOpen(true);
     };
 
+    // Watch for successful transactions
+    useEffect(() => {
+        if (isSuccess) {
+            if (fundingStep === 'approve') {
+                // Approval successful, move to funding
+                setFundingStep('fund');
+                toast.success('Stablecoin approved! Now funding loan...');
+                setIsLoading(false);
+            } else {
+                // Funding successful!
+                setIsLoading(false);
+                setIsFundModalOpen(false);
+                toast.success(`🔗 Successfully funded ${selectedLoan?.assetName} on blockchain!`);
+                setSelectedLoan(null);
+                setFundingStep('approve'); // Reset for next time
+            }
+        }
+    }, [isSuccess, fundingStep, selectedLoan, toast]);
+
     const confirmFunding = async () => {
         if (!selectedLoan) return;
 
         setIsLoading(true);
-        // Simulate blockchain transaction
-        setTimeout(() => {
+
+        try {
+            const stablecoin = getDefaultStablecoin(chainId);
+            if (!stablecoin) {
+                toast.error('No stablecoin configured for this network');
+                setIsLoading(false);
+                return;
+            }
+
+            const decimals = getStablecoinDecimals(chainId, stablecoin);
+            const amount = parseUnits(selectedLoan.requestedAmount.toString(), decimals);
+
+            if (fundingStep === 'approve') {
+                // Step 1: Approve stablecoin spending
+                await approveStablecoin(stablecoin, amount);
+                // Success will trigger useEffect to move to fund step
+            } else {
+                // Step 2: Fund the loan
+                await fundLoan(BigInt(selectedLoan.id));
+                // Success will trigger useEffect to close modal
+            }
+        } catch (err: any) {
+            console.error('Fund loan error:', err);
+            toast.error(err.message || 'Transaction failed');
             setIsLoading(false);
-            setIsFundModalOpen(false);
-            toast.success(`Successfully funded ${selectedLoan.assetName}!`);
-            setSelectedLoan(null);
-        }, 2000);
+        }
     };
 
     if (!isConnected) {
@@ -496,8 +550,16 @@ export function LenderDashboard() {
                             <Button variant="outline" onClick={() => setIsFundModalOpen(false)} disabled={isLoading}>
                                 Cancel
                             </Button>
-                            <LoadingButton isLoading={isLoading} onClick={confirmFunding}>
-                                {isLoading ? 'Processing...' : `Fund ${formatCurrency(selectedLoan.requestedAmount)}`}
+                            <LoadingButton isLoading={isLoading || isPending || isConfirming} onClick={confirmFunding}>
+                                {isPending
+                                    ? 'Signing...'
+                                    : isConfirming
+                                    ? 'Confirming...'
+                                    : isLoading
+                                    ? 'Processing...'
+                                    : fundingStep === 'approve'
+                                    ? `Approve USDT`
+                                    : `Fund ${formatCurrency(selectedLoan.requestedAmount)}`}
                             </LoadingButton>
                         </ModalFooter>
                     </div>

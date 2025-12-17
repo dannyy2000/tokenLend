@@ -6,15 +6,29 @@ import { Button } from '@/components/ui/Button';
 import { Slider } from '@/components/ui/Slider';
 import { formatCurrency, formatPercentage } from '@/lib/utils/format';
 import { AlertCircle, CheckCircle2, Loader2, Shield, TrendingUp, Calendar, Percent } from 'lucide-react';
-import { useAccount } from 'wagmi';
+import { useAccount, useChainId } from 'wagmi';
 import Link from 'next/link';
+import { useCreateLoan } from '@/lib/hooks';
+import { getDefaultStablecoin, getStablecoinDecimals } from '@/lib/contracts';
 
 export function LoanRequestForm() {
     const { address, isConnected } = useAccount();
+    const chainId = useChainId();
     const [loanAmount, setLoanAmount] = useState(100000);
     const [duration, setDuration] = useState(30);
+    const [assetTokenId, setAssetTokenId] = useState<string>('0'); // Demo: User would select their asset
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitted, setSubmitted] = useState(false);
+
+    // Real blockchain hook
+    const {
+        createLoan,
+        isPending,
+        isConfirming,
+        isSuccess,
+        hash,
+        error,
+    } = useCreateLoan();
 
     // Mock valuation data - in production, fetch from backend
     const mockValuation = {
@@ -35,6 +49,14 @@ export function LoanRequestForm() {
     const totalRepayment = loanAmount + totalInterest;
     const dailyPayment = totalRepayment / duration;
 
+    // Watch for successful transaction
+    useEffect(() => {
+        if (isSuccess) {
+            setIsSubmitting(false);
+            setSubmitted(true);
+        }
+    }, [isSuccess]);
+
     const handleSubmit = async () => {
         if (!isConnected) {
             alert('Please connect your wallet first');
@@ -43,11 +65,34 @@ export function LoanRequestForm() {
 
         setIsSubmitting(true);
 
-        // Simulate smart contract interaction
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        try {
+            // Get stablecoin for this network
+            const stablecoin = getDefaultStablecoin(chainId);
+            if (!stablecoin) {
+                alert('No stablecoin configured for this network');
+                setIsSubmitting(false);
+                return;
+            }
 
-        setIsSubmitting(false);
-        setSubmitted(true);
+            const decimals = getStablecoinDecimals(chainId, stablecoin);
+            const interestRateBasisPoints = 1000; // 10% APR
+
+            // 🔗 REAL BLOCKCHAIN TRANSACTION
+            await createLoan(
+                BigInt(assetTokenId), // Asset NFT ID (demo: using 0, user would select their asset)
+                loanAmount, // Principal amount
+                interestRateBasisPoints, // 10% = 1000 basis points
+                duration, // Duration in days
+                stablecoin, // Stablecoin address
+                decimals // Stablecoin decimals
+            );
+
+            // Transaction submitted! isSuccess will trigger useEffect above
+        } catch (err: any) {
+            console.error('Create loan error:', err);
+            alert(err.message || 'Transaction failed');
+            setIsSubmitting(false);
+        }
     };
 
     if (submitted) {
@@ -57,10 +102,18 @@ export function LoanRequestForm() {
                     <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-500/20 mb-6">
                         <CheckCircle2 className="w-10 h-10 text-green-500" />
                     </div>
-                    <h2 className="text-3xl font-bold text-white mb-4">Loan Request Submitted!</h2>
-                    <p className="text-xl text-gray-400 mb-8">
+                    <h2 className="text-3xl font-bold text-white mb-4">🔗 Loan Created on Blockchain!</h2>
+                    <p className="text-xl text-gray-400 mb-4">
                         Your loan request for {formatCurrency(loanAmount)} is now live
                     </p>
+                    {hash && (
+                        <div className="mb-8">
+                            <p className="text-sm text-gray-500 mb-2">Transaction Hash:</p>
+                            <code className="text-xs text-indigo-400 bg-slate-900/50 px-4 py-2 rounded-lg break-all">
+                                {hash}
+                            </code>
+                        </div>
+                    )}
                     <div className="space-y-4 max-w-md mx-auto mb-8">
                         <div className="flex items-center justify-between text-sm">
                             <span className="text-gray-400">Asset tokenized as NFT</span>
