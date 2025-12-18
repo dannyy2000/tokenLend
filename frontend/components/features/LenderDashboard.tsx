@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -11,10 +11,10 @@ import { LoadingButton } from '@/components/ui/Spinner';
 import { formatCurrency, formatDate } from '@/lib/utils/format';
 import { TrendingUp, Wallet, DollarSign, AlertCircle, CheckCircle2, Clock, Eye } from 'lucide-react';
 import Link from 'next/link';
-import { useAccount, useChainId } from 'wagmi';
-import { useFundLoan } from '@/lib/hooks';
-import { getDefaultStablecoin, getStablecoinDecimals } from '@/lib/contracts';
-import { parseUnits } from 'viem';
+import { useAccount, useChainId, usePublicClient } from 'wagmi';
+import { useFundLoan, useGetAvailableLoans, useGetLenderLoans } from '@/lib/hooks';
+import { getDefaultStablecoin, getStablecoinDecimals, AssetTokenABI, getContractAddresses } from '@/lib/contracts';
+import { parseUnits, formatUnits } from 'viem';
 
 interface LoanRequest {
     id: string;
@@ -48,13 +48,17 @@ interface FundedLoan {
 export function LenderDashboard() {
     const { address, isConnected } = useAccount();
     const chainId = useChainId();
+    const publicClient = usePublicClient();
+    const addresses = getContractAddresses(chainId);
     const { toast, toasts, removeToast } = useToast();
     const [selectedLoan, setSelectedLoan] = useState<LoanRequest | null>(null);
     const [isFundModalOpen, setIsFundModalOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [fundingStep, setFundingStep] = useState<'approve' | 'fund'>('approve');
+    const lastProcessedHash = useRef<string | null>(null);
+    const [assetDetails, setAssetDetails] = useState<Map<string, any>>(new Map());
 
-    // Real blockchain hook
+    // Real blockchain hooks
     const {
         approveStablecoin,
         fundLoan,
@@ -65,8 +69,72 @@ export function LenderDashboard() {
         error,
     } = useFundLoan();
 
-    // Mock data - in production, fetch from smart contracts
-    const mockAvailableLoans: LoanRequest[] = [
+    // Fetch real blockchain data
+    const { loans: blockchainAvailableLoans, isLoading: isLoadingAvailable, refetch: refetchAvailable } = useGetAvailableLoans();
+    const { loans: blockchainFundedLoans, isLoading: isLoadingFunded, refetch: refetchFunded } = useGetLenderLoans(address);
+
+    // Fetch asset details for all loans
+    useEffect(() => {
+        async function fetchAssetDetails() {
+            if (!publicClient || !addresses?.assetToken) return;
+
+            const allLoans = [...blockchainAvailableLoans, ...blockchainFundedLoans];
+            const newAssetDetails = new Map();
+
+            for (const loan of allLoans) {
+                const tokenId = loan.assetTokenId.toString();
+
+                // Skip if already fetched
+                if (assetDetails.has(tokenId)) {
+                    newAssetDetails.set(tokenId, assetDetails.get(tokenId));
+                    continue;
+                }
+
+                try {
+                    const asset = await publicClient.readContract({
+                        address: addresses.assetToken,
+                        abi: AssetTokenABI.abi,
+                        functionName: 'getAsset',
+                        args: [loan.assetTokenId],
+                    });
+                    newAssetDetails.set(tokenId, asset);
+                } catch (err) {
+                    console.error(`Failed to fetch asset ${tokenId}:`, err);
+                }
+            }
+
+            setAssetDetails(newAssetDetails);
+        }
+
+        fetchAssetDetails();
+    }, [blockchainAvailableLoans, blockchainFundedLoans, publicClient, addresses?.assetToken]);
+
+    // Convert blockchain loans to UI format
+    const mockAvailableLoans: LoanRequest[] = blockchainAvailableLoans.map((loan) => {
+        const tokenId = loan.assetTokenId.toString();
+        const asset = assetDetails.get(tokenId);
+        const assetType = asset?.assetType || 'asset';
+        const assetName = asset?.assetType
+            ? `${asset.assetType.charAt(0).toUpperCase() + asset.assetType.slice(1)} (Asset #${tokenId})`
+            : `Asset #${tokenId}`;
+
+        return {
+            id: loan.loanId.toString(),
+            borrower: `${loan.borrower.slice(0, 6)}...${loan.borrower.slice(-4)}`,
+            assetType: assetType,
+            assetName: assetName,
+            assetValue: Number(formatUnits(loan.principal, 6)) * 1.5, // Estimate based on LTV
+            requestedAmount: Number(formatUnits(loan.principal, 6)),
+            interestRate: Number(loan.interestRate) / 100, // Convert basis points to percentage
+            duration: Number(loan.duration) / (24 * 60 * 60), // Convert seconds to days
+            ltv: 66.7, // TODO: Calculate from asset value
+            createdAt: new Date().toISOString().split('T')[0],
+            status: 'active' as const,
+        };
+    });
+
+    // Mock data fallback for demo
+    const mockAvailableLoansDemo: LoanRequest[] = [
         {
             id: '1',
             borrower: '0x1234...5678',
@@ -108,36 +176,33 @@ export function LenderDashboard() {
         },
     ];
 
-    const mockFundedLoans: FundedLoan[] = [
-        {
-            id: '4',
-            borrower: '0x5555...6666',
-            assetType: 'smartphone',
-            assetName: 'iPhone 14 Pro 128GB',
-            principal: 200000,
-            totalRepayment: 206575,
-            amountRepaid: 103287,
-            interestRate: 10,
-            duration: 30,
-            startDate: '2024-12-01',
-            dueDate: '2024-12-31',
-            status: 'active',
-        },
-        {
-            id: '5',
-            borrower: '0x7777...8888',
-            assetType: 'laptop',
-            assetName: 'MacBook Pro M2',
-            principal: 350000,
-            totalRepayment: 360411,
-            amountRepaid: 360411,
-            interestRate: 10,
-            duration: 30,
-            startDate: '2024-11-15',
-            dueDate: '2024-12-15',
-            status: 'repaid',
-        },
-    ];
+    // Convert blockchain funded loans to UI format
+    const mockFundedLoans: FundedLoan[] = blockchainFundedLoans.map((loan) => {
+        const startDate = loan.startTime > 0n ? new Date(Number(loan.startTime) * 1000) : new Date();
+        const dueDate = loan.startTime > 0n ? new Date((Number(loan.startTime) + Number(loan.duration)) * 1000) : new Date();
+
+        const tokenId = loan.assetTokenId.toString();
+        const asset = assetDetails.get(tokenId);
+        const assetType = asset?.assetType || 'asset';
+        const assetName = asset?.assetType
+            ? `${asset.assetType.charAt(0).toUpperCase() + asset.assetType.slice(1)} (Asset #${tokenId})`
+            : `Asset #${tokenId}`;
+
+        return {
+            id: loan.loanId.toString(),
+            borrower: `${loan.borrower.slice(0, 6)}...${loan.borrower.slice(-4)}`,
+            assetType: assetType,
+            assetName: assetName,
+            principal: Number(formatUnits(loan.principal, 6)),
+            totalRepayment: Number(formatUnits(loan.totalRepayment, 6)),
+            amountRepaid: Number(formatUnits(loan.amountRepaid, 6)),
+            interestRate: Number(loan.interestRate) / 100,
+            duration: Number(loan.duration) / (24 * 60 * 60),
+            startDate: startDate.toISOString().split('T')[0],
+            dueDate: dueDate.toISOString().split('T')[0],
+            status: loan.status === 1 ? 'repaid' : loan.status === 2 ? 'defaulted' : 'active',
+        };
+    });
 
     const stats = {
         totalFunded: mockFundedLoans.reduce((sum, loan) => sum + loan.principal, 0),
@@ -171,24 +236,39 @@ export function LenderDashboard() {
         setIsFundModalOpen(true);
     };
 
-    // Watch for successful transactions
+    // Watch for successful transactions (only process each hash once)
     useEffect(() => {
-        if (isSuccess) {
+        if (isSuccess && hash && hash !== lastProcessedHash.current) {
+            lastProcessedHash.current = hash;
+
             if (fundingStep === 'approve') {
                 // Approval successful, move to funding
+                console.log('✅ Approval successful, moving to fund step');
                 setFundingStep('fund');
-                toast.success('Stablecoin approved! Now funding loan...');
                 setIsLoading(false);
-            } else {
+            } else if (fundingStep === 'fund') {
                 // Funding successful!
+                const loanName = selectedLoan?.assetName || 'loan';
+                console.log('✅ Funding successful for:', loanName);
                 setIsLoading(false);
                 setIsFundModalOpen(false);
-                toast.success(`🔗 Successfully funded ${selectedLoan?.assetName} on blockchain!`);
+
+                // Show success message once
+                toast.success(`🔗 Successfully funded ${loanName} on blockchain!`);
+
+                // Refetch loan data after a delay to allow blockchain to update
+                setTimeout(() => {
+                    console.log('🔄 Refetching loans after funding...');
+                    refetchAvailable();
+                    refetchFunded();
+                }, 3000);
+
+                // Reset state
                 setSelectedLoan(null);
-                setFundingStep('approve'); // Reset for next time
+                setFundingStep('approve');
             }
         }
-    }, [isSuccess, fundingStep, selectedLoan, toast]);
+    }, [isSuccess, hash, fundingStep, selectedLoan, refetchAvailable, refetchFunded, toast]);
 
     const confirmFunding = async () => {
         if (!selectedLoan) return;
@@ -302,12 +382,17 @@ export function LenderDashboard() {
             <div className="space-y-4 mb-12">
                 <div className="flex items-center justify-between">
                     <h2 className="text-2xl font-bold text-white">Available Loan Requests</h2>
-                    <Button variant="outline" size="sm">
-                        Filter
+                    <Button variant="outline" size="sm" onClick={() => refetchAvailable()}>
+                        Refresh
                     </Button>
                 </div>
 
-                {mockAvailableLoans.length === 0 ? (
+                {isLoadingAvailable ? (
+                    <Card variant="glass" className="text-center py-16">
+                        <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mb-4"></div>
+                        <p className="text-gray-400">Loading available loans...</p>
+                    </Card>
+                ) : mockAvailableLoans.length === 0 ? (
                     <Card variant="glass" className="text-center py-16">
                         <AlertCircle className="w-16 h-16 mx-auto mb-4 text-gray-400" />
                         <h3 className="text-xl font-bold text-white mb-2">No Loan Requests Available</h3>
@@ -537,10 +622,13 @@ export function LenderDashboard() {
                             <div className="flex gap-2">
                                 <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
                                 <div className="text-sm text-amber-200">
-                                    <p className="font-semibold mb-1">Important Notice</p>
-                                    <p>
-                                        Make sure you have reviewed the asset details and borrower information before funding
-                                        this loan. Funds will be transferred immediately upon confirmation.
+                                    <p className="font-semibold mb-1">Funding Process</p>
+                                    <p className="mb-2">
+                                        <strong>Step 1:</strong> Approve mUSDT (Mock USDT for testing)<br />
+                                        <strong>Step 2:</strong> Fund the loan
+                                    </p>
+                                    <p className="text-xs text-amber-300">
+                                        Note: mUSDT is a test token. In production, this would be real USDT.
                                     </p>
                                 </div>
                             </div>
@@ -558,8 +646,8 @@ export function LenderDashboard() {
                                     : isLoading
                                     ? 'Processing...'
                                     : fundingStep === 'approve'
-                                    ? `Approve USDT`
-                                    : `Fund ${formatCurrency(selectedLoan.requestedAmount)}`}
+                                    ? `Approve mUSDT (Step 1/2)`
+                                    : `Fund ${formatCurrency(selectedLoan.requestedAmount)} (Step 2/2)`}
                             </LoadingButton>
                         </ModalFooter>
                     </div>

@@ -18,35 +18,59 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useAccount } from 'wagmi';
+import { useGetLoan, useGetAsset } from '@/lib/hooks';
+import { formatUnits } from 'viem';
 
 export default function FundedLoanDetailPage() {
     const params = useParams();
     const { address, isConnected } = useAccount();
 
-    // Mock data - in production, fetch from smart contracts using params.id
-    const loan = {
-        id: params.id as string,
-        borrower: '0x5555...6666',
-        assetType: 'smartphone',
-        assetName: 'iPhone 14 Pro 128GB',
-        assetDescription: 'iPhone 14 Pro in Space Black, 128GB storage. Mint condition with original box and accessories.',
-        principal: 200000,
-        totalRepayment: 206575,
-        amountRepaid: 103287,
-        interestRate: 10,
-        duration: 30,
-        startDate: '2024-12-01',
-        dueDate: '2024-12-31',
-        status: 'active',
-        assetValue: 350000,
-        ltv: 57.1,
-        nextPaymentDue: '2024-12-20',
-        nextPaymentAmount: 51644,
-    };
+    // Fetch real loan data from blockchain
+    const loanId = params.id ? BigInt(params.id as string) : undefined;
+    const { loan: blockchainLoan, isLoading: isLoadingLoan } = useGetLoan(loanId);
 
-    const repaymentProgress = (loan.amountRepaid / loan.totalRepayment) * 100;
-    const interestEarned = loan.amountRepaid - loan.principal > 0 ? loan.amountRepaid - loan.principal : 0;
-    const remainingBalance = loan.totalRepayment - loan.amountRepaid;
+    // Fetch asset details
+    const assetTokenId = blockchainLoan?.assetTokenId;
+    const { asset: assetDetails, isLoading: isLoadingAsset } = useGetAsset(assetTokenId);
+
+    // Debug logs
+    console.log('🔍 Funded Loan ID:', params.id);
+    console.log('🔍 Funded Blockchain Loan:', blockchainLoan);
+    console.log('🔍 Asset Details:', assetDetails);
+
+    // Calculate due date
+    const dueDate = blockchainLoan?.startTime && blockchainLoan.startTime > 0n
+        ? new Date((Number(blockchainLoan.startTime) + Number(blockchainLoan.duration)) * 1000).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0];
+
+    // Convert blockchain data to UI format
+    const loan = blockchainLoan ? {
+        id: params.id as string,
+        borrower: `${blockchainLoan.borrower.slice(0, 6)}...${blockchainLoan.borrower.slice(-4)}`,
+        assetType: assetDetails?.assetType || 'asset',
+        assetName: assetDetails?.assetType
+            ? `${assetDetails.assetType.charAt(0).toUpperCase() + assetDetails.assetType.slice(1)} (Asset #${blockchainLoan.assetTokenId?.toString() || '0'})`
+            : `Asset #${blockchainLoan.assetTokenId?.toString() || '0'}`,
+        assetDescription: 'Real-world asset tokenized on blockchain',
+        principal: Number(formatUnits(blockchainLoan.principal || 0n, 6)),
+        totalRepayment: Number(formatUnits(blockchainLoan.totalRepayment || 0n, 6)),
+        amountRepaid: Number(formatUnits(blockchainLoan.amountRepaid || 0n, 6)),
+        interestRate: Number(blockchainLoan.interestRate || 0n) / 100,
+        duration: Number(blockchainLoan.duration || 0n) / (24 * 60 * 60),
+        startDate: blockchainLoan.startTime && blockchainLoan.startTime > 0n
+            ? new Date(Number(blockchainLoan.startTime) * 1000).toISOString().split('T')[0]
+            : new Date().toISOString().split('T')[0],
+        dueDate: dueDate,
+        status: blockchainLoan.status === 1 ? 'repaid' : blockchainLoan.status === 2 ? 'defaulted' : 'active',
+        assetValue: Number(formatUnits(blockchainLoan.principal || 0n, 6)) * 1.5,
+        ltv: 66.7,
+        nextPaymentDue: dueDate, // Same as due date since it's a single payment loan
+        nextPaymentAmount: Number(formatUnits((blockchainLoan.totalRepayment || 0n) - (blockchainLoan.amountRepaid || 0n), 6)),
+    } : null;
+
+    const repaymentProgress = loan ? (loan.amountRepaid / loan.totalRepayment) * 100 : 0;
+    const interestEarned = loan && loan.amountRepaid - loan.principal > 0 ? loan.amountRepaid - loan.principal : 0;
+    const remainingBalance = loan ? loan.totalRepayment - loan.amountRepaid : 0;
 
     // Mock payment history
     const paymentHistory = [
@@ -88,6 +112,42 @@ export default function FundedLoanDetailPage() {
                         <Card variant="glass" className="text-center py-16">
                             <h2 className="text-2xl font-bold text-white mb-2">Connect Your Wallet</h2>
                             <p className="text-gray-400">Connect your wallet to view loan details</p>
+                        </Card>
+                    </div>
+                </div>
+            </main>
+        );
+    }
+
+    if (isLoadingLoan || isLoadingAsset) {
+        return (
+            <main className="min-h-screen">
+                <Navbar />
+                <div className="pt-24 pb-12">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <Card variant="glass" className="text-center py-16">
+                            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mb-4"></div>
+                            <p className="text-gray-400">Loading loan details...</p>
+                        </Card>
+                    </div>
+                </div>
+            </main>
+        );
+    }
+
+    if (!loan) {
+        return (
+            <main className="min-h-screen">
+                <Navbar />
+                <div className="pt-24 pb-12">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <Card variant="glass" className="text-center py-16">
+                            <AlertCircle className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                            <h2 className="text-2xl font-bold text-white mb-2">Loan Not Found</h2>
+                            <p className="text-gray-400 mb-6">This loan doesn't exist</p>
+                            <Link href="/lend">
+                                <Button>Back to Dashboard</Button>
+                            </Link>
                         </Card>
                     </div>
                 </div>

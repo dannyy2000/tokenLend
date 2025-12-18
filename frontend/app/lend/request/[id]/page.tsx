@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useAccount } from 'wagmi';
+import { useGetLoan } from '@/lib/hooks';
+import { formatUnits } from 'viem';
 
 export default function LoanRequestDetailPage() {
     const params = useParams();
@@ -31,35 +33,40 @@ export default function LoanRequestDetailPage() {
     const [isFundModalOpen, setIsFundModalOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
-    // Mock data - in production, fetch from smart contracts using params.id
-    const loanRequest = {
-        id: params.id as string,
-        borrower: '0x1234...5678',
-        assetType: 'smartphone',
-        assetName: 'Samsung Galaxy S23 Ultra 256GB',
-        assetDescription: 'Brand new, sealed Samsung Galaxy S23 Ultra with 256GB storage in Phantom Black color.',
-        assetValue: 450000,
-        requestedAmount: 300000,
-        interestRate: 12,
-        duration: 60,
-        ltv: 66.7,
-        createdAt: '2024-12-15',
-        status: 'active',
-        images: [
-            '/api/placeholder/400/300',
-            '/api/placeholder/400/300',
-            '/api/placeholder/400/300',
-        ],
-        aiValuation: {
-            estimatedValue: 450000,
-            confidence: 92,
-            condition: 'Excellent',
-            marketPrice: 480000,
-        },
-    };
+    // Fetch real loan data from blockchain
+    const loanId = params.id ? BigInt(params.id as string) : undefined;
+    const { loan: blockchainLoan, isLoading: isLoadingLoan } = useGetLoan(loanId);
 
-    const expectedReturn = loanRequest.requestedAmount * (1 + (loanRequest.interestRate / 100) * (loanRequest.duration / 365));
-    const expectedProfit = expectedReturn - loanRequest.requestedAmount;
+    // Debug: Log the actual loan data
+    console.log('🔍 Loan ID:', params.id);
+    console.log('🔍 Blockchain Loan Data:', blockchainLoan);
+    console.log('🔍 Loading:', isLoadingLoan);
+
+    // Convert blockchain data to UI format
+    const loanRequest = blockchainLoan ? {
+        id: params.id as string,
+        borrower: `${blockchainLoan.borrower.slice(0, 6)}...${blockchainLoan.borrower.slice(-4)}`,
+        assetType: 'asset',
+        assetName: `Asset #${blockchainLoan.assetTokenId?.toString() || '0'}`,
+        assetDescription: 'Asset tokenized on blockchain',
+        assetValue: Number(formatUnits(blockchainLoan.principal || 0n, 6)) * 1.5, // Estimate
+        requestedAmount: Number(formatUnits(blockchainLoan.principal || 0n, 6)),
+        interestRate: Number(blockchainLoan.interestRate || 0n) / 100,
+        duration: Number(blockchainLoan.duration || 0n) / (24 * 60 * 60),
+        ltv: 66.7,
+        createdAt: new Date().toISOString().split('T')[0],
+        status: 'active',
+        images: [],
+        aiValuation: {
+            estimatedValue: Number(formatUnits(blockchainLoan.principal || 0n, 6)) * 1.5,
+            confidence: 85,
+            condition: 'Good',
+            marketPrice: Number(formatUnits(blockchainLoan.principal || 0n, 6)) * 1.6,
+        },
+    } : null;
+
+    const expectedReturn = loanRequest ? loanRequest.requestedAmount * (1 + (loanRequest.interestRate / 100) * (loanRequest.duration / 365)) : 0;
+    const expectedProfit = loanRequest ? expectedReturn - loanRequest.requestedAmount : 0;
 
     const handleFundLoan = () => {
         setIsFundModalOpen(true);
@@ -87,6 +94,42 @@ export default function LoanRequestDetailPage() {
                         <Card variant="glass" className="text-center py-16">
                             <h2 className="text-2xl font-bold text-white mb-2">Connect Your Wallet</h2>
                             <p className="text-gray-400">Connect your wallet to view loan details</p>
+                        </Card>
+                    </div>
+                </div>
+            </main>
+        );
+    }
+
+    if (isLoadingLoan) {
+        return (
+            <main className="min-h-screen">
+                <Navbar />
+                <div className="pt-24 pb-12">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <Card variant="glass" className="text-center py-16">
+                            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mb-4"></div>
+                            <p className="text-gray-400">Loading loan details...</p>
+                        </Card>
+                    </div>
+                </div>
+            </main>
+        );
+    }
+
+    if (!loanRequest) {
+        return (
+            <main className="min-h-screen">
+                <Navbar />
+                <div className="pt-24 pb-12">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <Card variant="glass" className="text-center py-16">
+                            <AlertCircle className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                            <h2 className="text-2xl font-bold text-white mb-2">Loan Not Found</h2>
+                            <p className="text-gray-400 mb-6">This loan doesn't exist or has been removed</p>
+                            <Link href="/lend">
+                                <Button>Back to Dashboard</Button>
+                            </Link>
                         </Card>
                     </div>
                 </div>

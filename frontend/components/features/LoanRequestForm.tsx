@@ -16,7 +16,7 @@ export function LoanRequestForm() {
     const chainId = useChainId();
     const [loanAmount, setLoanAmount] = useState(100000);
     const [duration, setDuration] = useState(30);
-    const [assetTokenId, setAssetTokenId] = useState<string>('0'); // Demo: User would select their asset
+    const [assetTokenId, setAssetTokenId] = useState<string>('1'); // Updated to use Asset #1
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitted, setSubmitted] = useState(false);
 
