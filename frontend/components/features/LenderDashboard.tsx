@@ -12,9 +12,10 @@ import { formatCurrency, formatDate } from '@/lib/utils/format';
 import { TrendingUp, Wallet, DollarSign, AlertCircle, CheckCircle2, Clock, Eye } from 'lucide-react';
 import Link from 'next/link';
 import { useAccount, useChainId, usePublicClient } from 'wagmi';
-import { useFundLoan, useGetAvailableLoans, useGetLenderLoans } from '@/lib/hooks';
-import { getDefaultStablecoin, getStablecoinDecimals, AssetTokenABI, getContractAddresses } from '@/lib/contracts';
-import { parseUnits, formatUnits } from 'viem';
+import { useFundLoan } from '@/lib/hooks';
+import { getDefaultStablecoin, getStablecoinDecimals, getContractAddresses } from '@/lib/contracts';
+import { parseUnits } from 'viem';
+import * as loanAPI from '@/lib/api/loans';
 
 interface LoanRequest {
     id: string;
@@ -56,7 +57,10 @@ export function LenderDashboard() {
     const [isLoading, setIsLoading] = useState(false);
     const [fundingStep, setFundingStep] = useState<'approve' | 'fund'>('approve');
     const lastProcessedHash = useRef<string | null>(null);
-    const [assetDetails, setAssetDetails] = useState<Map<string, any>>(new Map());
+    const [availableLoans, setAvailableLoans] = useState<LoanRequest[]>([]);
+    const [fundedLoans, setFundedLoans] = useState<FundedLoan[]>([]);
+    const [isLoadingAvailable, setIsLoadingAvailable] = useState(true);
+    const [isLoadingFunded, setIsLoadingFunded] = useState(true);
 
     // Real blockchain hooks
     const {
@@ -69,149 +73,101 @@ export function LenderDashboard() {
         error,
     } = useFundLoan();
 
-    // Fetch real blockchain data
-    const { loans: blockchainAvailableLoans, isLoading: isLoadingAvailable, refetch: refetchAvailable } = useGetAvailableLoans();
-    const { loans: blockchainFundedLoans, isLoading: isLoadingFunded, refetch: refetchFunded } = useGetLenderLoans(address);
+    // Fetch available loans from backend
+    const fetchAvailableLoans = async () => {
+        try {
+            setIsLoadingAvailable(true);
+            const response = await loanAPI.getAvailableLoans(20);
 
-    // Fetch asset details for all loans
-    useEffect(() => {
-        async function fetchAssetDetails() {
-            if (!publicClient || !addresses?.assetToken) return;
+            if (response.success && response.loans) {
+                const formattedLoans: LoanRequest[] = response.loans.map((loan: any) => {
+                    // Calculate LTV from principal and estimated asset value
+                    const estimatedAssetValue = loan.principal * 1.5; // Rough estimate
+                    const ltv = (loan.principal / estimatedAssetValue) * 100;
 
-            const allLoans = [...blockchainAvailableLoans, ...blockchainFundedLoans];
-            const newAssetDetails = new Map();
+                    return {
+                        id: loan.loanId.toString(),
+                        borrower: `${loan.borrower.slice(0, 6)}...${loan.borrower.slice(-4)}`,
+                        assetType: loan.assetType || 'asset',
+                        assetName: `Asset #${loan.assetTokenId}`,
+                        assetValue: estimatedAssetValue,
+                        requestedAmount: loan.principal,
+                        interestRate: loan.interestRate / 100,
+                        duration: loan.duration,
+                        ltv,
+                        createdAt: new Date(loan.createdAt).toISOString().split('T')[0],
+                        status: 'active' as const,
+                    };
+                });
 
-            for (const loan of allLoans) {
-                const tokenId = loan.assetTokenId.toString();
-
-                // Skip if already fetched
-                if (assetDetails.has(tokenId)) {
-                    newAssetDetails.set(tokenId, assetDetails.get(tokenId));
-                    continue;
-                }
-
-                try {
-                    const asset = await publicClient.readContract({
-                        address: addresses.assetToken,
-                        abi: AssetTokenABI.abi,
-                        functionName: 'getAsset',
-                        args: [loan.assetTokenId],
-                    });
-                    newAssetDetails.set(tokenId, asset);
-                } catch (err) {
-                    console.error(`Failed to fetch asset ${tokenId}:`, err);
-                }
+                setAvailableLoans(formattedLoans);
             }
-
-            setAssetDetails(newAssetDetails);
+        } catch (err) {
+            console.error('Failed to fetch available loans:', err);
+        } finally {
+            setIsLoadingAvailable(false);
         }
+    };
 
-        fetchAssetDetails();
-    }, [blockchainAvailableLoans, blockchainFundedLoans, publicClient, addresses?.assetToken]);
+    // Fetch funded loans from backend
+    const fetchFundedLoans = async () => {
+        if (!address) return;
 
-    // Convert blockchain loans to UI format
-    const mockAvailableLoans: LoanRequest[] = blockchainAvailableLoans.map((loan) => {
-        const tokenId = loan.assetTokenId.toString();
-        const asset = assetDetails.get(tokenId);
-        const assetType = asset?.assetType || 'asset';
-        const assetName = asset?.assetType
-            ? `${asset.assetType.charAt(0).toUpperCase() + asset.assetType.slice(1)} (Asset #${tokenId})`
-            : `Asset #${tokenId}`;
+        try {
+            setIsLoadingFunded(true);
+            const response = await loanAPI.getLenderLoans(address);
 
-        return {
-            id: loan.loanId.toString(),
-            borrower: `${loan.borrower.slice(0, 6)}...${loan.borrower.slice(-4)}`,
-            assetType: assetType,
-            assetName: assetName,
-            assetValue: Number(formatUnits(loan.principal, 6)) * 1.5, // Estimate based on LTV
-            requestedAmount: Number(formatUnits(loan.principal, 6)),
-            interestRate: Number(loan.interestRate) / 100, // Convert basis points to percentage
-            duration: Number(loan.duration) / (24 * 60 * 60), // Convert seconds to days
-            ltv: 66.7, // TODO: Calculate from asset value
-            createdAt: new Date().toISOString().split('T')[0],
-            status: 'active' as const,
-        };
-    });
+            if (response.success && response.loans) {
+                const formattedLoans: FundedLoan[] = response.loans.map((loan: any) => {
+                    const startDate = loan.fundedAt ? new Date(loan.fundedAt) : null;
+                    const dueDate = startDate
+                        ? new Date(startDate.getTime() + loan.duration * 24 * 60 * 60 * 1000)
+                        : null;
 
-    // Mock data fallback for demo
-    const mockAvailableLoansDemo: LoanRequest[] = [
-        {
-            id: '1',
-            borrower: '0x1234...5678',
-            assetType: 'smartphone',
-            assetName: 'Samsung Galaxy S23 Ultra 256GB',
-            assetValue: 450000,
-            requestedAmount: 300000,
-            interestRate: 12,
-            duration: 60,
-            ltv: 66.7,
-            createdAt: '2024-12-15',
-            status: 'active',
-        },
-        {
-            id: '2',
-            borrower: '0xabcd...efgh',
-            assetType: 'laptop',
-            assetName: 'Dell XPS 15',
-            requestedAmount: 250000,
-            assetValue: 400000,
-            interestRate: 10,
-            duration: 45,
-            ltv: 62.5,
-            createdAt: '2024-12-14',
-            status: 'active',
-        },
-        {
-            id: '3',
-            borrower: '0x9876...4321',
-            assetType: 'machinery',
-            assetName: 'Industrial Sewing Machine',
-            requestedAmount: 500000,
-            assetValue: 800000,
-            interestRate: 15,
-            duration: 90,
-            ltv: 62.5,
-            createdAt: '2024-12-13',
-            status: 'active',
-        },
-    ];
+                    return {
+                        id: loan.loanId.toString(),
+                        borrower: `${loan.borrower.slice(0, 6)}...${loan.borrower.slice(-4)}`,
+                        assetType: loan.assetType || 'asset',
+                        assetName: `Asset #${loan.assetTokenId}`,
+                        principal: loan.principal,
+                        totalRepayment: loan.totalRepayment,
+                        amountRepaid: loan.amountRepaid || 0,
+                        interestRate: loan.interestRate / 100,
+                        duration: loan.duration,
+                        startDate: startDate ? startDate.toISOString().split('T')[0] : '',
+                        dueDate: dueDate ? dueDate.toISOString().split('T')[0] : '',
+                        status: loan.status as 'active' | 'repaid' | 'defaulted',
+                    };
+                });
 
-    // Convert blockchain funded loans to UI format
-    const mockFundedLoans: FundedLoan[] = blockchainFundedLoans.map((loan) => {
-        const startDate = loan.startTime > 0n ? new Date(Number(loan.startTime) * 1000) : new Date();
-        const dueDate = loan.startTime > 0n ? new Date((Number(loan.startTime) + Number(loan.duration)) * 1000) : new Date();
+                setFundedLoans(formattedLoans);
+            }
+        } catch (err) {
+            console.error('Failed to fetch funded loans:', err);
+        } finally {
+            setIsLoadingFunded(false);
+        }
+    };
 
-        const tokenId = loan.assetTokenId.toString();
-        const asset = assetDetails.get(tokenId);
-        const assetType = asset?.assetType || 'asset';
-        const assetName = asset?.assetType
-            ? `${asset.assetType.charAt(0).toUpperCase() + asset.assetType.slice(1)} (Asset #${tokenId})`
-            : `Asset #${tokenId}`;
+    // Fetch loans on mount and when address changes
+    useEffect(() => {
+        fetchAvailableLoans();
+    }, []);
 
-        return {
-            id: loan.loanId.toString(),
-            borrower: `${loan.borrower.slice(0, 6)}...${loan.borrower.slice(-4)}`,
-            assetType: assetType,
-            assetName: assetName,
-            principal: Number(formatUnits(loan.principal, 6)),
-            totalRepayment: Number(formatUnits(loan.totalRepayment, 6)),
-            amountRepaid: Number(formatUnits(loan.amountRepaid, 6)),
-            interestRate: Number(loan.interestRate) / 100,
-            duration: Number(loan.duration) / (24 * 60 * 60),
-            startDate: startDate.toISOString().split('T')[0],
-            dueDate: dueDate.toISOString().split('T')[0],
-            status: loan.status === 1 ? 'repaid' : loan.status === 2 ? 'defaulted' : 'active',
-        };
-    });
+    useEffect(() => {
+        if (address) {
+            fetchFundedLoans();
+        }
+    }, [address]);
 
     const stats = {
-        totalFunded: mockFundedLoans.reduce((sum, loan) => sum + loan.principal, 0),
-        activeInvestments: mockFundedLoans.filter((l) => l.status === 'active').length,
-        interestEarned: mockFundedLoans.reduce(
+        totalFunded: fundedLoans.reduce((sum, loan) => sum + loan.principal, 0),
+        activeInvestments: fundedLoans.filter((l) => l.status === 'active').length,
+        interestEarned: fundedLoans.reduce(
             (sum, loan) => sum + (loan.amountRepaid - loan.principal > 0 ? loan.amountRepaid - loan.principal : 0),
             0
         ),
-        availableLoans: mockAvailableLoans.filter((l) => l.status === 'active').length,
+        availableLoans: availableLoans.filter((l) => l.status === 'active').length,
     };
 
     const getStatusColor = (status: string) => {
@@ -256,11 +212,29 @@ export function LenderDashboard() {
                 // Show success message once
                 toast.success(`🔗 Successfully funded ${loanName} on blockchain!`);
 
+                // Sync funding to backend
+                const syncFunding = async () => {
+                    if (!selectedLoan || !address) return;
+
+                    try {
+                        await loanAPI.fundLoan(Number(selectedLoan.id), {
+                            lender: address,
+                            txHash: hash,
+                        });
+                        console.log('✅ Funding synced to backend');
+                    } catch (err) {
+                        console.error('⚠️ Failed to sync funding to backend:', err);
+                        // Don't fail the UI if backend sync fails
+                    }
+                };
+
+                syncFunding();
+
                 // Refetch loan data after a delay to allow blockchain to update
                 setTimeout(() => {
                     console.log('🔄 Refetching loans after funding...');
-                    refetchAvailable();
-                    refetchFunded();
+                    fetchAvailableLoans();
+                    fetchFundedLoans();
                 }, 3000);
 
                 // Reset state
@@ -268,7 +242,7 @@ export function LenderDashboard() {
                 setFundingStep('approve');
             }
         }
-    }, [isSuccess, hash, fundingStep, selectedLoan, refetchAvailable, refetchFunded, toast]);
+    }, [isSuccess, hash, fundingStep, selectedLoan, toast, address]);
 
     const confirmFunding = async () => {
         if (!selectedLoan) return;
@@ -382,7 +356,7 @@ export function LenderDashboard() {
             <div className="space-y-4 mb-12">
                 <div className="flex items-center justify-between">
                     <h2 className="text-2xl font-bold text-white">Available Loan Requests</h2>
-                    <Button variant="outline" size="sm" onClick={() => refetchAvailable()}>
+                    <Button variant="outline" size="sm" onClick={() => fetchAvailableLoans()}>
                         Refresh
                     </Button>
                 </div>
@@ -392,7 +366,7 @@ export function LenderDashboard() {
                         <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mb-4"></div>
                         <p className="text-gray-400">Loading available loans...</p>
                     </Card>
-                ) : mockAvailableLoans.length === 0 ? (
+                ) : availableLoans.length === 0 ? (
                     <Card variant="glass" className="text-center py-16">
                         <AlertCircle className="w-16 h-16 mx-auto mb-4 text-gray-400" />
                         <h3 className="text-xl font-bold text-white mb-2">No Loan Requests Available</h3>
@@ -400,7 +374,7 @@ export function LenderDashboard() {
                     </Card>
                 ) : (
                     <div className="grid gap-4">
-                        {mockAvailableLoans.map((loan) => (
+                        {availableLoans.map((loan) => (
                             <Card key={loan.id} variant="glass" className="hover:border-indigo-500/50 transition-colors">
                                 <CardContent className="p-6">
                                     <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
@@ -484,7 +458,12 @@ export function LenderDashboard() {
             <div className="space-y-4">
                 <h2 className="text-2xl font-bold text-white">My Funded Loans</h2>
 
-                {mockFundedLoans.length === 0 ? (
+                {isLoadingFunded ? (
+                    <Card variant="glass" className="text-center py-16">
+                        <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500 mb-4"></div>
+                        <p className="text-gray-400">Loading funded loans...</p>
+                    </Card>
+                ) : fundedLoans.length === 0 ? (
                     <Card variant="glass" className="text-center py-16">
                         <TrendingUp className="w-16 h-16 mx-auto mb-4 text-gray-400" />
                         <h3 className="text-xl font-bold text-white mb-2">No Funded Loans Yet</h3>
@@ -492,7 +471,7 @@ export function LenderDashboard() {
                     </Card>
                 ) : (
                     <div className="grid gap-4">
-                        {mockFundedLoans.map((loan) => (
+                        {fundedLoans.map((loan) => (
                             <Card key={loan.id} variant="glass" className="hover:border-indigo-500/50 transition-colors">
                                 <CardContent className="p-6">
                                     <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">

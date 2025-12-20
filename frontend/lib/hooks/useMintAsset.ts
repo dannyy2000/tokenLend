@@ -30,12 +30,14 @@ export function useMintAsset() {
      * @param aiValuation - AI estimated value in USD (will be scaled to 18 decimals)
      * @param maxLTV - Maximum loan-to-value ratio in basis points (e.g., 7000 = 70%)
      * @param borrower - Address of the borrower (asset owner)
+     * @param uri - Token URI (IPFS link or metadata URL)
      */
     const mintAsset = async (
         assetType: string,
         aiValuation: number,
         maxLTV: number,
-        borrower: `0x${string}`
+        borrower: `0x${string}`,
+        uri: string
     ) => {
         if (!addresses?.assetToken) {
             throw new Error('AssetToken contract not deployed on this network');
@@ -48,7 +50,7 @@ export function useMintAsset() {
             address: addresses.assetToken,
             abi: AssetTokenABI.abi,
             functionName: 'mintAsset',
-            args: [borrower, assetType, valuationWei, BigInt(maxLTV)],
+            args: [borrower, assetType, valuationWei, BigInt(maxLTV), uri],
         });
     };
 

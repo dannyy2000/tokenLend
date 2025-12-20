@@ -1,12 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { Modal, ModalFooter } from '@/components/ui/Modal';
+import { LoadingButton } from '@/components/ui/Spinner';
+import { useToast, ToastContainer } from '@/components/ui/Toast';
 import { formatCurrency, formatDate } from '@/lib/utils/format';
 import { TrendingUp, Wallet, Clock, Plus, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
 import Link from 'next/link';
-import { useAccount } from 'wagmi';
+import { useAccount, useChainId, usePublicClient } from 'wagmi';
+import { useRepayLoan } from '@/lib/hooks';
+import { getDefaultStablecoin, getStablecoinDecimals, getContractAddresses } from '@/lib/contracts';
+import { parseUnits } from 'viem';
+import * as loanAPI from '@/lib/api/loans';
 
 interface Loan {
     id: string;
@@ -25,43 +32,82 @@ interface Loan {
 
 export function BorrowerDashboard() {
     const { address, isConnected } = useAccount();
+    const chainId = useChainId();
+    const publicClient = usePublicClient();
+    const addresses = getContractAddresses(chainId);
+    const { toast, toasts, removeToast } = useToast();
+    const [selectedLoan, setSelectedLoan] = useState<Loan | null>(null);
+    const [isRepayModalOpen, setIsRepayModalOpen] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [repaymentStep, setRepaymentStep] = useState<'approve' | 'repay'>('approve');
+    const lastProcessedHash = useRef<string | null>(null);
+    const [loans, setLoans] = useState<Loan[]>([]);
+    const [isLoadingLoans, setIsLoadingLoans] = useState(true);
 
-    // Mock data - in production, fetch from smart contracts
-    const mockLoans: Loan[] = [
-        {
-            id: '1',
-            assetType: 'smartphone',
-            assetName: 'iPhone 14 128GB',
-            principal: 200000,
-            totalRepayment: 206575,
-            amountRepaid: 103287,
-            interestRate: 10,
-            duration: 30,
-            startDate: '2024-12-01',
-            dueDate: '2024-12-31',
-            status: 'funded',
-            lender: '0x742d...4e89',
-        },
-        {
-            id: '2',
-            assetType: 'laptop',
-            assetName: 'MacBook Pro M1',
-            principal: 150000,
-            totalRepayment: 154110,
-            amountRepaid: 0,
-            interestRate: 10,
-            duration: 30,
-            startDate: '',
-            dueDate: '',
-            status: 'active',
-        },
-    ];
+    // Real blockchain hooks
+    const {
+        approveRepayment,
+        makeRepayment,
+        isPending,
+        isConfirming,
+        isSuccess,
+        hash,
+        error,
+    } = useRepayLoan();
+
+    // Fetch loans from backend
+    const fetchLoans = async () => {
+        if (!address) return;
+
+        try {
+            setIsLoadingLoans(true);
+            const response = await loanAPI.getBorrowerLoans(address);
+
+            if (response.success && response.loans) {
+                // Convert backend loans to UI format
+                const formattedLoans: Loan[] = response.loans.map((loan: any) => {
+                    const startDate = loan.fundedAt ? new Date(loan.fundedAt) : null;
+                    const dueDate = startDate
+                        ? new Date(startDate.getTime() + loan.duration * 24 * 60 * 60 * 1000)
+                        : null;
+
+                    return {
+                        id: loan.loanId.toString(),
+                        assetType: loan.assetType || 'asset',
+                        assetName: `Asset #${loan.assetTokenId}`,
+                        principal: loan.principal,
+                        totalRepayment: loan.totalRepayment,
+                        amountRepaid: loan.amountRepaid || 0,
+                        interestRate: loan.interestRate / 100,
+                        duration: loan.duration,
+                        startDate: startDate ? startDate.toISOString().split('T')[0] : '',
+                        dueDate: dueDate ? dueDate.toISOString().split('T')[0] : '',
+                        status: loan.status as 'active' | 'funded' | 'repaid' | 'defaulted',
+                        lender: loan.lender
+                            ? `${loan.lender.slice(0, 6)}...${loan.lender.slice(-4)}`
+                            : undefined,
+                    };
+                });
+
+                setLoans(formattedLoans);
+            }
+        } catch (err) {
+            console.error('Failed to fetch loans:', err);
+        } finally {
+            setIsLoadingLoans(false);
+        }
+    };
+
+    // Fetch loans on mount and when address changes
+    useEffect(() => {
+        fetchLoans();
+    }, [address]);
 
     const stats = {
-        totalBorrowed: mockLoans.reduce((sum, loan) => sum + loan.principal, 0),
-        totalRepaid: mockLoans.reduce((sum, loan) => sum + loan.amountRepaid, 0),
-        activeLoans: mockLoans.filter((l) => l.status === 'funded').length,
-        pendingLoans: mockLoans.filter((l) => l.status === 'active').length,
+        totalBorrowed: loans.filter((l) => l.status === 'funded' || l.status === 'repaid').reduce((sum, loan) => sum + loan.principal, 0),
+        totalRepaid: loans.reduce((sum, loan) => sum + loan.amountRepaid, 0),
+        activeLoans: loans.filter((l) => l.status === 'funded').length,
+        pendingLoans: loans.filter((l) => l.status === 'active').length,
     };
 
     const getStatusColor = (status: string) => {
@@ -94,9 +140,96 @@ export function BorrowerDashboard() {
         }
     };
 
+    const handleRepayLoan = (loan: Loan) => {
+        setSelectedLoan(loan);
+        setIsRepayModalOpen(true);
+    };
+
+    // Watch for successful transactions
+    useEffect(() => {
+        if (isSuccess && hash && hash !== lastProcessedHash.current) {
+            lastProcessedHash.current = hash;
+
+            if (repaymentStep === 'approve') {
+                console.log('✅ Approval successful, moving to repay step');
+                setRepaymentStep('repay');
+                setIsLoading(false);
+            } else if (repaymentStep === 'repay') {
+                const loanName = selectedLoan?.assetName || 'loan';
+                console.log('✅ Repayment successful for:', loanName);
+                setIsLoading(false);
+                setIsRepayModalOpen(false);
+
+                toast.success(`🔗 Successfully repaid ${loanName} on blockchain!`);
+
+                // Sync repayment to backend
+                const syncRepayment = async () => {
+                    if (!selectedLoan) return;
+
+                    try {
+                        const remainingAmount = selectedLoan.totalRepayment - selectedLoan.amountRepaid;
+                        await loanAPI.repayLoan(Number(selectedLoan.id), {
+                            amount: remainingAmount,
+                            txHash: hash,
+                        });
+                        console.log('✅ Repayment synced to backend');
+                    } catch (err) {
+                        console.error('⚠️ Failed to sync repayment to backend:', err);
+                        // Don't fail the UI if backend sync fails
+                    }
+                };
+
+                syncRepayment();
+
+                // Refetch loan data after a delay
+                setTimeout(() => {
+                    console.log('🔄 Refetching loans after repayment...');
+                    fetchLoans();
+                }, 3000);
+
+                // Reset state
+                setSelectedLoan(null);
+                setRepaymentStep('approve');
+            }
+        }
+    }, [isSuccess, hash, repaymentStep, selectedLoan, toast]);
+
+    const confirmRepayment = async () => {
+        if (!selectedLoan) return;
+
+        setIsLoading(true);
+
+        try {
+            const stablecoin = getDefaultStablecoin(chainId);
+            if (!stablecoin) {
+                toast.error('No stablecoin configured for this network');
+                setIsLoading(false);
+                return;
+            }
+
+            const decimals = getStablecoinDecimals(chainId, stablecoin);
+            // Calculate remaining amount to repay
+            const remainingAmount = selectedLoan.totalRepayment - selectedLoan.amountRepaid;
+            const amount = parseUnits(remainingAmount.toString(), decimals);
+
+            if (repaymentStep === 'approve') {
+                // Step 1: Approve stablecoin spending
+                await approveRepayment(stablecoin, amount);
+            } else {
+                // Step 2: Make repayment
+                await makeRepayment(BigInt(selectedLoan.id), amount);
+            }
+        } catch (err: any) {
+            console.error('Repayment error:', err);
+            toast.error(err.message || 'Transaction failed');
+            setIsLoading(false);
+        }
+    };
+
     if (!isConnected) {
         return (
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <ToastContainer toasts={toasts} onRemove={removeToast} />
                 <Card variant="glass" className="text-center py-16">
                     <Wallet className="w-16 h-16 mx-auto mb-4 text-gray-400" />
                     <h2 className="text-2xl font-bold text-white mb-2">Connect Your Wallet</h2>
@@ -110,6 +243,7 @@ export function BorrowerDashboard() {
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <ToastContainer toasts={toasts} onRemove={removeToast} />
             {/* Header */}
             <div className="flex items-center justify-between mb-8">
                 <div>
@@ -178,7 +312,12 @@ export function BorrowerDashboard() {
             {/* Loans List */}
             <div className="space-y-4">
                 <h2 className="text-2xl font-bold text-white">Your Loans</h2>
-                {mockLoans.length === 0 ? (
+                {isLoadingLoans ? (
+                    <Card variant="glass" className="text-center py-16">
+                        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-500 mx-auto mb-4"></div>
+                        <h3 className="text-xl font-bold text-white mb-2">Loading Loans...</h3>
+                    </Card>
+                ) : loans.length === 0 ? (
                     <Card variant="glass" className="text-center py-16">
                         <TrendingUp className="w-16 h-16 mx-auto mb-4 text-gray-400" />
                         <h3 className="text-xl font-bold text-white mb-2">No Loans Yet</h3>
@@ -190,7 +329,7 @@ export function BorrowerDashboard() {
                         </Link>
                     </Card>
                 ) : (
-                    mockLoans.map((loan) => (
+                    loans.map((loan) => (
                         <Card key={loan.id} variant="glass" className="hover:border-indigo-500/50 transition-colors">
                             <CardContent className="p-6">
                                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -256,7 +395,9 @@ export function BorrowerDashboard() {
                                                             View Details
                                                         </Button>
                                                     </Link>
-                                                    <Button size="sm">Make Payment</Button>
+                                                    <Button size="sm" onClick={() => handleRepayLoan(loan)}>
+                                                        Make Payment
+                                                    </Button>
                                                 </div>
                                             </>
                                         )}
@@ -277,6 +418,79 @@ export function BorrowerDashboard() {
                     ))
                 )}
             </div>
+
+            {/* Repayment Modal */}
+            <Modal
+                isOpen={isRepayModalOpen}
+                onClose={() => setIsRepayModalOpen(false)}
+                title="Repay Loan"
+                description="Review repayment details and confirm"
+                size="md"
+            >
+                {selectedLoan && (
+                    <div className="space-y-6">
+                        <div className="bg-slate-900/50 rounded-xl p-4 space-y-3">
+                            <div className="flex justify-between">
+                                <span className="text-gray-400">Asset:</span>
+                                <span className="font-semibold text-white">{selectedLoan.assetName}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-gray-400">Principal:</span>
+                                <span className="font-semibold text-white">{formatCurrency(selectedLoan.principal)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-gray-400">Total Repayment:</span>
+                                <span className="font-semibold text-white">{formatCurrency(selectedLoan.totalRepayment)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-gray-400">Already Paid:</span>
+                                <span className="font-semibold text-green-400">{formatCurrency(selectedLoan.amountRepaid)}</span>
+                            </div>
+                            <div className="border-t border-gray-700 pt-3">
+                                <div className="flex justify-between">
+                                    <span className="text-gray-400">Remaining Amount:</span>
+                                    <span className="font-semibold text-indigo-400">
+                                        {formatCurrency(selectedLoan.totalRepayment - selectedLoan.amountRepaid)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4">
+                            <div className="flex gap-2">
+                                <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                                <div className="text-sm text-amber-200">
+                                    <p className="font-semibold mb-1">Repayment Process</p>
+                                    <p className="mb-2">
+                                        <strong>Step 1:</strong> Approve mUSDT (Mock USDT for testing)<br />
+                                        <strong>Step 2:</strong> Make repayment
+                                    </p>
+                                    <p className="text-xs text-amber-300">
+                                        Note: This will repay the full remaining amount.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <ModalFooter>
+                            <Button variant="outline" onClick={() => setIsRepayModalOpen(false)} disabled={isLoading}>
+                                Cancel
+                            </Button>
+                            <LoadingButton isLoading={isLoading || isPending || isConfirming} onClick={confirmRepayment}>
+                                {isPending
+                                    ? 'Signing...'
+                                    : isConfirming
+                                    ? 'Confirming...'
+                                    : isLoading
+                                    ? 'Processing...'
+                                    : repaymentStep === 'approve'
+                                    ? `Approve mUSDT (Step 1/2)`
+                                    : `Repay ${formatCurrency(selectedLoan.totalRepayment - selectedLoan.amountRepaid)} (Step 2/2)`}
+                            </LoadingButton>
+                        </ModalFooter>
+                    </div>
+                )}
+            </Modal>
         </div>
     );
 }

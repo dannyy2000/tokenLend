@@ -175,3 +175,80 @@ export function useGetLenderLoans(lenderAddress?: string) {
         refetch,
     };
 }
+
+/**
+ * Hook to get loans for a specific borrower
+ */
+export function useGetBorrowerLoans(borrowerAddress?: string) {
+    const chainId = useChainId();
+    const addresses = getContractAddresses(chainId);
+    const publicClient = usePublicClient();
+    const [loans, setLoans] = useState<LoanData[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<Error | null>(null);
+    const [refetchTrigger, setRefetchTrigger] = useState(0);
+
+    useEffect(() => {
+        async function fetchLoans() {
+            if (!addresses?.loanManager || !publicClient || !borrowerAddress) {
+                setLoans([]);
+                setIsLoading(false);
+                return;
+            }
+
+            setIsLoading(true);
+            setError(null);
+
+            try {
+                const borrowerLoans: LoanData[] = [];
+
+                // Try to fetch loans starting from 0 until we hit an error
+                for (let i = 0; i < 100; i++) {
+                    try {
+                        const loan = await publicClient.readContract({
+                            address: addresses.loanManager,
+                            abi: LoanManagerABI.abi,
+                            functionName: 'getLoan',
+                            args: [BigInt(i)],
+                        }) as any;
+
+                        // Check if loan is valid (borrower is not zero address)
+                        if (loan.borrower === '0x0000000000000000000000000000000000000000') {
+                            // Empty loan, we've reached the end
+                            break;
+                        }
+
+                        // Only include loans for this borrower
+                        if (loan.borrower.toLowerCase() === borrowerAddress.toLowerCase()) {
+                            borrowerLoans.push(loan as LoanData);
+                        }
+                    } catch (err) {
+                        // If we can't fetch a loan, we've reached the end
+                        break;
+                    }
+                }
+
+                setLoans(borrowerLoans);
+                console.log(`Found ${borrowerLoans.length} loans for borrower ${borrowerAddress}`);
+            } catch (err) {
+                setError(err as Error);
+                console.error('Error fetching borrower loans:', err);
+            } finally {
+                setIsLoading(false);
+            }
+        }
+
+        fetchLoans();
+    }, [addresses?.loanManager, publicClient, refetchTrigger, borrowerAddress]);
+
+    const refetch = () => {
+        setRefetchTrigger(prev => prev + 1);
+    };
+
+    return {
+        loans,
+        isLoading,
+        error,
+        refetch,
+    };
+}

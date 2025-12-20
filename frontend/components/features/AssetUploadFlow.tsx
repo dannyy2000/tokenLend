@@ -79,24 +79,41 @@ export function AssetUploadFlow() {
         setIsLoading(true);
 
         try {
-            // Call backend API for valuation
-            const formData = new FormData();
-            assetData.images?.forEach((file) => {
-                formData.append('images', file);
-            });
-            formData.append('assetType', details.assetType);
-            formData.append('brand', details.brand);
-            formData.append('model', details.model);
-            formData.append('variant', details.variant || '');
-            formData.append('purchaseDate', details.purchaseDate);
-            formData.append('serialNumber', details.serialNumber || '');
+            // Convert images to base64
+            const imagePromises = assetData.images?.map((file) => {
+                return new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result as string);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+            }) || [];
 
+            const base64Images = await Promise.all(imagePromises);
+
+            // Call backend API for valuation
             const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/valuations`, {
                 method: 'POST',
-                body: formData,
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    assetType: details.assetType,
+                    brand: details.brand,
+                    model: details.model,
+                    variant: details.variant || '',
+                    purchaseDate: details.purchaseDate,
+                    serialNumber: details.serialNumber || '',
+                    images: base64Images,
+                }),
             });
 
             const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.message || 'Valuation failed');
+            }
+
             setValuation(result);
         } catch (error) {
             console.error('Valuation error:', error);

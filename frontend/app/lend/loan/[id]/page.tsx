@@ -72,21 +72,15 @@ export default function FundedLoanDetailPage() {
     const interestEarned = loan && loan.amountRepaid - loan.principal > 0 ? loan.amountRepaid - loan.principal : 0;
     const remainingBalance = loan ? loan.totalRepayment - loan.amountRepaid : 0;
 
-    // Mock payment history
-    const paymentHistory = [
+    // Real payment history - these are single-payment loans, so we only show if there's been a repayment
+    const paymentHistory = loan && loan.amountRepaid > 0 ? [
         {
             id: '1',
-            date: '2024-12-10',
-            amount: 51644,
-            status: 'completed',
+            date: new Date().toISOString().split('T')[0], // Current date as we don't track payment timestamp
+            amount: loan.amountRepaid,
+            status: loan.status === 'repaid' ? 'completed' : 'partial',
         },
-        {
-            id: '2',
-            date: '2024-12-05',
-            amount: 51643,
-            status: 'completed',
-        },
-    ];
+    ] : [];
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -98,6 +92,8 @@ export default function FundedLoanDetailPage() {
                 return 'error';
             case 'completed':
                 return 'success';
+            case 'partial':
+                return 'warning';
             default:
                 return 'default';
         }
@@ -270,10 +266,11 @@ export default function FundedLoanDetailPage() {
                                                 </Badge>
                                             </div>
                                         ))}
-                                        {paymentHistory.length === 0 && (
+                                        {paymentHistory.length === 0 && loan && (
                                             <div className="text-center py-8">
-                                                <AlertCircle className="w-12 h-12 mx-auto mb-3 text-gray-600" />
-                                                <p className="text-gray-400">No payments received yet</p>
+                                                <Clock className="w-12 h-12 mx-auto mb-3 text-gray-600" />
+                                                <p className="text-gray-400 mb-1">Single Payment Loan</p>
+                                                <p className="text-sm text-gray-500">Full payment of {formatCurrency(loan.totalRepayment)} due on {formatDate(loan.dueDate)}</p>
                                             </div>
                                         )}
                                     </div>

@@ -11,6 +11,7 @@ const app = express();
 const authRoutes = require('./src/routes/auth.routes');
 const valuationRoutes = require('./src/routes/valuation.routes');
 const assetRoutes = require('./src/routes/asset.routes');
+const loanRoutes = require('./src/routes/loan.routes');
 
 // Middleware
 app.use(helmet()); // Security headers
@@ -44,6 +45,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/valuations', valuationRoutes);
 app.use('/api/assets', assetRoutes);
+app.use('/api/loans', loanRoutes);
 
 // 404 handler
 app.use((req, res) => {

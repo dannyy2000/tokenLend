@@ -11,5 +11,5 @@ export { useRepayLoan } from './useRepayLoan';
 
 // Data fetching hooks (read operations)
 export { useGetLoan, useGetLoanCount, useGetUserLoans, useGetLoanStatus } from './useGetLoans';
-export { useGetAvailableLoans, useGetLenderLoans } from './useGetAllLoans';
+export { useGetAvailableLoans, useGetLenderLoans, useGetBorrowerLoans } from './useGetAllLoans';
 export { useGetAsset } from './useGetAsset';
