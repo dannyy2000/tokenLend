@@ -41,15 +41,15 @@ export function Hero() {
 
                     {/* CTA Buttons */}
                     <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                        <Link href="/borrow/upload">
+                        <Link href="/onboarding/borrower">
                             <Button size="lg" className="w-full sm:w-auto">
                                 Get Started as Borrower
                                 <ArrowRight className="ml-2 w-5 h-5" />
                             </Button>
                         </Link>
-                        <Link href="/lend">
+                        <Link href="/onboarding/lender">
                             <Button size="lg" variant="outline" className="w-full sm:w-auto">
-                                Explore Lending Opportunities
+                                Become a Lender
                             </Button>
                         </Link>
                     </div>

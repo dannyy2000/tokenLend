@@ -27,10 +27,9 @@ export const CONTRACTS: Record<number, ContractAddresses> = {
 
     // Mantle Sepolia Testnet
     5003: {
-        assetToken: '0x0000000000000000000000000000000000000000', // TODO: Deploy and update
-        loanManager: '0x0000000000000000000000000000000000000000', // TODO: Deploy and update
-        mockStablecoin: '0x0000000000000000000000000000000000000000', // TODO: Deploy and update
-        // TODO: Add real testnet stablecoin addresses
+        assetToken: '0xC1B27b3088E42DDa3ec1e6cFDAF75326eF119d9b',
+        loanManager: '0xe3f280493a9F02336B618Ef4d5Bd76a71a642150',
+        mockStablecoin: '0x458Bc92f5dA2527475D63B3fEb56fC9085F82128',
     },
 
     // Mantle Mainnet

@@ -31,15 +31,62 @@ const UserSchema = new mongoose.Schema({
     phoneNumber: {
       type: String,
       trim: true
-    },
+    }
+  },
+
+  // SME Business Profile (for borrowers)
+  businessProfile: {
     businessName: {
+      type: String,
+      trim: true
+    },
+    cacNumber: {
       type: String,
       trim: true
     },
     businessType: {
       type: String,
-      enum: ['retail', 'wholesale', 'manufacturing', 'services', 'other']
-    }
+      enum: ['retail', 'wholesale', 'manufacturing', 'services', 'agriculture', 'technology', 'hospitality', 'healthcare', 'education', 'other']
+    },
+    businessAddress: {
+      street: String,
+      city: String,
+      state: String,
+      country: { type: String, default: 'Nigeria' }
+    },
+    businessPhone: {
+      type: String,
+      trim: true
+    },
+    businessEmail: {
+      type: String,
+      trim: true,
+      lowercase: true
+    },
+    registrationDate: Date,
+    numberOfEmployees: {
+      type: String,
+      enum: ['1-5', '6-10', '11-50', '51-200', '200+']
+    },
+    // Verification documents
+    documents: [{
+      type: {
+        type: String,
+        enum: ['cac_certificate', 'utility_bill', 'business_registration', 'tax_id', 'other']
+      },
+      url: String, // IPFS hash or URL
+      fileName: String,
+      uploadedAt: {
+        type: Date,
+        default: Date.now
+      }
+    }],
+    // Verification consent
+    verificationConsent: {
+      type: Boolean,
+      default: false
+    },
+    consentDate: Date
   },
 
   // Wallet Address
@@ -49,16 +96,31 @@ const UserSchema = new mongoose.Schema({
     lowercase: true
   },
 
-  // KYC Status
-  kyc: {
-    status: {
-      type: String,
-      enum: ['not_started', 'pending', 'approved', 'rejected'],
-      default: 'not_started'
+  // SME Verification Status (for borrowers)
+  verificationStatus: {
+    type: String,
+    enum: ['unverified', 'pending', 'verified', 'rejected'],
+    default: 'unverified'
+  },
+  verifiedAt: Date,
+  verificationMethod: {
+    type: String,
+    enum: ['auto_consent', 'document_upload', 'manual_review'],
+  },
+
+  // Lender Settings
+  lenderProfile: {
+    riskAcknowledged: {
+      type: Boolean,
+      default: false
     },
-    submittedAt: Date,
-    approvedAt: Date,
-    documents: [String] // IPFS hashes or URLs
+    riskAcknowledgedAt: Date,
+    investmentPreferences: {
+      minLoanAmount: Number,
+      maxLoanAmount: Number,
+      preferredAssetTypes: [String],
+      preferredLoanTerms: [Number] // in days
+    }
   },
 
   // User Role
@@ -172,6 +234,37 @@ UserSchema.methods.incrementValuations = function() {
 UserSchema.methods.updateLastLogin = function() {
   this.lastLogin = new Date();
   return this.save();
+};
+
+// Method to auto-verify SME (for hackathon)
+UserSchema.methods.autoVerifySME = function() {
+  // Auto-verify if consent is given OR documents uploaded
+  if (this.businessProfile?.verificationConsent === true) {
+    this.verificationStatus = 'verified';
+    this.verifiedAt = new Date();
+    this.verificationMethod = 'auto_consent';
+    return this.save();
+  }
+
+  if (this.businessProfile?.documents && this.businessProfile.documents.length > 0) {
+    this.verificationStatus = 'verified';
+    this.verifiedAt = new Date();
+    this.verificationMethod = 'document_upload';
+    return this.save();
+  }
+
+  return Promise.resolve(this);
+};
+
+// Method to check if user can create loans (must be verified borrower)
+UserSchema.methods.canCreateLoan = function() {
+  return (this.role === 'borrower' || this.role === 'both') &&
+         this.verificationStatus === 'verified';
+};
+
+// Method to check if user can fund loans
+UserSchema.methods.canFundLoan = function() {
+  return this.role === 'lender' || this.role === 'both';
 };
 
 // Static method to find by email

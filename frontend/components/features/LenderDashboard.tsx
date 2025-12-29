@@ -8,14 +8,16 @@ import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { useToast, ToastContainer } from '@/components/ui/Toast';
 import { LoadingButton } from '@/components/ui/Spinner';
+import { LenderBadge } from '@/components/ui/VerificationBadge';
 import { formatCurrency, formatDate } from '@/lib/utils/format';
-import { TrendingUp, Wallet, DollarSign, AlertCircle, CheckCircle2, Clock, Eye } from 'lucide-react';
+import { TrendingUp, Wallet, DollarSign, AlertCircle, CheckCircle2, Clock, Eye, Info, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { useAccount, useChainId, usePublicClient } from 'wagmi';
 import { useFundLoan } from '@/lib/hooks';
 import { getDefaultStablecoin, getStablecoinDecimals, getContractAddresses } from '@/lib/contracts';
 import { parseUnits } from 'viem';
 import * as loanAPI from '@/lib/api/loans';
+import { getLenderProfile } from '@/lib/api/verification';
 
 interface LoanRequest {
     id: string;
@@ -61,6 +63,16 @@ export function LenderDashboard() {
     const [fundedLoans, setFundedLoans] = useState<FundedLoan[]>([]);
     const [isLoadingAvailable, setIsLoadingAvailable] = useState(true);
     const [isLoadingFunded, setIsLoadingFunded] = useState(true);
+
+    // Lender profile state (optional)
+    const [lenderProfile, setLenderProfile] = useState<{
+        riskAcknowledged: boolean;
+        hasProfile: boolean;
+    }>({
+        riskAcknowledged: false,
+        hasProfile: false
+    });
+    const [showWelcomeBanner, setShowWelcomeBanner] = useState(false);
 
     // Real blockchain hooks
     const {
@@ -149,6 +161,35 @@ export function LenderDashboard() {
         }
     };
 
+    // Check lender profile (optional, for showing badges)
+    const checkLenderProfile = async () => {
+        if (!address) return;
+
+        try {
+            const result = await getLenderProfile(address);
+
+            if (result.success && result.data) {
+                const hasProfile = !!result.data.lenderProfile;
+                const riskAcknowledged = result.data.lenderProfile?.riskAcknowledged || false;
+
+                setLenderProfile({
+                    riskAcknowledged,
+                    hasProfile
+                });
+
+                // Show welcome banner if they haven't completed onboarding
+                setShowWelcomeBanner(!hasProfile);
+            } else {
+                // No profile yet - show welcome banner
+                setShowWelcomeBanner(true);
+            }
+        } catch (err) {
+            console.error('Failed to check lender profile:', err);
+            // Show welcome banner on error (assume new user)
+            setShowWelcomeBanner(true);
+        }
+    };
+
     // Fetch loans on mount and when address changes
     useEffect(() => {
         fetchAvailableLoans();
@@ -157,6 +198,7 @@ export function LenderDashboard() {
     useEffect(() => {
         if (address) {
             fetchFundedLoans();
+            checkLenderProfile();
         }
     }, [address]);
 
@@ -295,9 +337,48 @@ export function LenderDashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <ToastContainer toasts={toasts} onRemove={removeToast} />
 
+            {/* Welcome Banner for New Lenders */}
+            {showWelcomeBanner && (
+                <Card variant="glass" className="mb-6 border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 to-purple-500/10">
+                    <CardContent className="p-6">
+                        <div className="flex items-start gap-4">
+                            <div className="flex-shrink-0">
+                                <Info className="w-8 h-8 text-indigo-400" />
+                            </div>
+                            <div className="flex-1">
+                                <h3 className="text-lg font-semibold text-white mb-2">
+                                    Welcome to TokenLend!
+                                </h3>
+                                <p className="text-white/70 mb-4">
+                                    Start funding SME loans backed by real-world assets. Complete lender onboarding to learn about risks and become an accredited lender.
+                                </p>
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <Link href="/onboarding/lender">
+                                        <Button size="sm" variant="outline">
+                                            <ShieldCheck className="w-4 h-4 mr-2" />
+                                            Complete Onboarding (Optional)
+                                        </Button>
+                                    </Link>
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => setShowWelcomeBanner(false)}
+                                    >
+                                        Dismiss
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
             {/* Header */}
             <div className="mb-8">
-                <h1 className="text-4xl font-bold text-white mb-2">Lender Dashboard</h1>
+                <div className="flex items-center gap-3 mb-2">
+                    <h1 className="text-4xl font-bold text-white">Lender Dashboard</h1>
+                    <LenderBadge riskAcknowledged={lenderProfile.riskAcknowledged} />
+                </div>
                 <p className="text-gray-400">Browse loan requests and manage your investments</p>
             </div>
 

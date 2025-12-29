@@ -22,7 +22,7 @@ const hardhat: Chain = {
 export const config = getDefaultConfig({
     appName: 'TokenLend',
     projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'YOUR_PROJECT_ID',
-    chains: [hardhat, mantleSepoliaTestnet, mantle],
+    chains: [mantleSepoliaTestnet, hardhat, mantle],
     transports: {
         [hardhat.id]: http('http://127.0.0.1:8545'),
         [mantleSepoliaTestnet.id]: http(process.env.NEXT_PUBLIC_MANTLE_TESTNET_RPC),

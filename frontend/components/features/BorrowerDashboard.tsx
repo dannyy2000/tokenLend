@@ -6,14 +6,16 @@ import { Button } from '@/components/ui/Button';
 import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { LoadingButton } from '@/components/ui/Spinner';
 import { useToast, ToastContainer } from '@/components/ui/Toast';
+import { VerificationBadge } from '@/components/ui/VerificationBadge';
 import { formatCurrency, formatDate } from '@/lib/utils/format';
-import { TrendingUp, Wallet, Clock, Plus, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
+import { TrendingUp, Wallet, Clock, Plus, AlertCircle, CheckCircle2, XCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { useAccount, useChainId, usePublicClient } from 'wagmi';
 import { useRepayLoan } from '@/lib/hooks';
 import { getDefaultStablecoin, getStablecoinDecimals, getContractAddresses } from '@/lib/contracts';
 import { parseUnits } from 'viem';
 import * as loanAPI from '@/lib/api/loans';
+import { checkCanCreateLoan } from '@/lib/api/verification';
 
 interface Loan {
     id: string;
@@ -44,6 +46,18 @@ export function BorrowerDashboard() {
     const [loans, setLoans] = useState<Loan[]>([]);
     const [isLoadingLoans, setIsLoadingLoans] = useState(true);
 
+    // Verification state
+    const [verificationStatus, setVerificationStatus] = useState<{
+        canCreate: boolean;
+        reason?: string;
+        requiresAction?: string;
+        verificationStatus?: string;
+        hasBusinessProfile?: boolean;
+    }>({
+        canCreate: false
+    });
+    const [isCheckingVerification, setIsCheckingVerification] = useState(true);
+
     // Real blockchain hooks
     const {
         approveRepayment,
@@ -54,6 +68,30 @@ export function BorrowerDashboard() {
         hash,
         error,
     } = useRepayLoan();
+
+    // Check verification status
+    const checkVerification = async () => {
+        if (!address) return;
+
+        try {
+            setIsCheckingVerification(true);
+            const result = await checkCanCreateLoan(address);
+
+            if (result.success) {
+                setVerificationStatus({
+                    canCreate: result.canCreate || false,
+                    reason: result.reason,
+                    requiresAction: result.requiresAction,
+                    verificationStatus: result.verificationStatus,
+                    hasBusinessProfile: result.hasBusinessProfile
+                });
+            }
+        } catch (err) {
+            console.error('Failed to check verification:', err);
+        } finally {
+            setIsCheckingVerification(false);
+        }
+    };
 
     // Fetch loans from backend
     const fetchLoans = async () => {
@@ -98,8 +136,9 @@ export function BorrowerDashboard() {
         }
     };
 
-    // Fetch loans on mount and when address changes
+    // Check verification and fetch loans on mount and when address changes
     useEffect(() => {
+        checkVerification();
         fetchLoans();
     }, [address]);
 
@@ -244,18 +283,81 @@ export function BorrowerDashboard() {
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <ToastContainer toasts={toasts} onRemove={removeToast} />
+
+            {/* Verification Banner */}
+            {!isCheckingVerification && !verificationStatus.canCreate && (
+                <Card variant="glass" className="mb-6 border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-orange-500/10">
+                    <CardContent className="p-6">
+                        <div className="flex items-start gap-4">
+                            <div className="flex-shrink-0">
+                                <ShieldAlert className="w-8 h-8 text-amber-400" />
+                            </div>
+                            <div className="flex-1">
+                                <h3 className="text-lg font-semibold text-white mb-2">
+                                    Business Verification Required
+                                </h3>
+                                <p className="text-white/70 mb-4">
+                                    {verificationStatus.reason || 'Please complete your business profile to request loans.'}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <Link href="/onboarding/borrower">
+                                        <Button size="sm">
+                                            <ShieldCheck className="w-4 h-4 mr-2" />
+                                            Verify Business Profile
+                                        </Button>
+                                    </Link>
+                                    {verificationStatus.verificationStatus && (
+                                        <VerificationBadge
+                                            status={verificationStatus.verificationStatus as any}
+                                        />
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* Success Banner for Verified Users */}
+            {!isCheckingVerification && verificationStatus.canCreate && (
+                <Card variant="glass" className="mb-6 border-green-500/30 bg-gradient-to-br from-green-500/10 to-emerald-500/10">
+                    <CardContent className="p-4">
+                        <div className="flex items-center gap-3">
+                            <ShieldCheck className="w-6 h-6 text-green-400" />
+                            <div className="flex-1">
+                                <p className="text-white font-medium">
+                                    Your business is verified! You can now request loans.
+                                </p>
+                            </div>
+                            <VerificationBadge status="verified" />
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
             {/* Header */}
             <div className="flex items-center justify-between mb-8">
                 <div>
                     <h1 className="text-4xl font-bold text-white mb-2">My Loans</h1>
                     <p className="text-gray-400">Manage your active loans and borrowing history</p>
                 </div>
-                <Link href="/borrow/upload">
-                    <Button size="lg">
+                {verificationStatus.canCreate ? (
+                    <Link href="/borrow/upload">
+                        <Button size="lg">
+                            <Plus className="w-5 h-5 mr-2" />
+                            New Loan
+                        </Button>
+                    </Link>
+                ) : (
+                    <Button
+                        size="lg"
+                        disabled
+                        title="Complete business verification to create loans"
+                    >
                         <Plus className="w-5 h-5 mr-2" />
                         New Loan
                     </Button>
-                </Link>
+                )}
             </div>
 
             {/* Stats Grid */}
@@ -322,11 +424,22 @@ export function BorrowerDashboard() {
                         <TrendingUp className="w-16 h-16 mx-auto mb-4 text-gray-400" />
                         <h3 className="text-xl font-bold text-white mb-2">No Loans Yet</h3>
                         <p className="text-gray-400 mb-8">
-                            Upload an asset to get started with your first loan
+                            {verificationStatus.canCreate
+                                ? 'Upload an asset to get started with your first loan'
+                                : 'Complete business verification to start requesting loans'}
                         </p>
-                        <Link href="/borrow/upload">
-                            <Button size="lg">Upload Asset</Button>
-                        </Link>
+                        {verificationStatus.canCreate ? (
+                            <Link href="/borrow/upload">
+                                <Button size="lg">Upload Asset</Button>
+                            </Link>
+                        ) : (
+                            <Link href="/onboarding/borrower">
+                                <Button size="lg">
+                                    <ShieldCheck className="w-5 h-5 mr-2" />
+                                    Verify Business
+                                </Button>
+                            </Link>
+                        )}
                     </Card>
                 ) : (
                     loans.map((loan) => (

@@ -1,5 +1,6 @@
 const Loan = require('../models/Loan');
 const Valuation = require('../models/Valuation');
+const User = require('../models/User');
 
 /**
  * Create a new loan record from blockchain data
@@ -440,6 +441,72 @@ exports.getOverdueLoans = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error fetching overdue loans',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Check if a wallet address can create loans (verified borrower check)
+ * GET /api/loans/can-create/:address
+ */
+exports.checkCanCreateLoan = async (req, res) => {
+  try {
+    const { address } = req.params;
+
+    // Find user by wallet address
+    const user = await User.findByWallet(address);
+
+    if (!user) {
+      return res.json({
+        success: true,
+        canCreate: false,
+        reason: 'User not found. Please create a business profile first.',
+        requiresAction: 'create_profile'
+      });
+    }
+
+    // Check if user can create loans
+    const canCreate = user.canCreateLoan();
+
+    if (!canCreate) {
+      let reason = '';
+      let requiresAction = '';
+
+      if (user.role !== 'borrower' && user.role !== 'both') {
+        reason = 'Only borrowers can create loan requests';
+        requiresAction = 'change_role';
+      } else if (user.verificationStatus !== 'verified') {
+        reason = 'Business profile must be verified before creating loans';
+        requiresAction = 'complete_verification';
+      } else {
+        reason = 'Unable to create loans at this time';
+        requiresAction = 'contact_support';
+      }
+
+      return res.json({
+        success: true,
+        canCreate: false,
+        reason,
+        requiresAction,
+        verificationStatus: user.verificationStatus,
+        hasBusinessProfile: !!user.businessProfile?.businessName
+      });
+    }
+
+    res.json({
+      success: true,
+      canCreate: true,
+      message: 'User is verified and can create loans',
+      verificationStatus: user.verificationStatus,
+      verifiedAt: user.verifiedAt
+    });
+
+  } catch (error) {
+    console.error('Check can create loan error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error checking loan creation eligibility',
       error: error.message
     });
   }

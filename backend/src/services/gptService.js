@@ -17,7 +17,8 @@ async function analyzeAssetImage(imageUrl, userInput) {
   const prompt = `
 You are an expert asset valuator. Analyze this image and provide a detailed assessment.
 
-IMAGE URL: ${imageUrl}
+IMAGE URL: ${imageUrl} 
+
 
 USER INPUT:
 - Asset Type: ${assetType}

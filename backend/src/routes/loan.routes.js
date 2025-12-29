@@ -40,6 +40,13 @@ router.put('/:loanId/liquidate', loanController.liquidateLoan);
 router.get('/', loanController.getAllLoans);
 
 /**
+ * @route   GET /api/loans/can-create/:address
+ * @desc    Check if a wallet address can create loans (verification check)
+ * @access  Public
+ */
+router.get('/can-create/:address', loanController.checkCanCreateLoan);
+
+/**
  * @route   GET /api/loans/available
  * @desc    Get available loan requests (not yet funded)
  * @access  Public

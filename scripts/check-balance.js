@@ -1,34 +1,38 @@
 const hre = require("hardhat");
 
 async function main() {
-    const [account] = await hre.ethers.getSigners();
-    const deployment = require("../deployments/localhost.json");
+  const network = hre.network.name;
+  console.log(`\n💰 Checking balances on ${network}...\n`);
 
-    const MockStablecoin = await hre.ethers.getContractAt(
-        "MockStablecoin",
-        deployment.contracts.mockStablecoin
-    );
+  // Load deployment addresses
+  const deploymentFile = `./deployments/${network}.json`;
+  const deployment = require(deploymentFile);
 
-    const balance = await MockStablecoin.balanceOf(account.address);
+  const mockStablecoinAddress = deployment.contracts.mockStablecoin;
+  const walletAddress = "0x133b345dcb54838fa841E6E85bC5b9CEA07E946D";
 
-    console.log("\n💰 Account Balance Check");
-    console.log("=".repeat(50));
-    console.log("Account:", account.address);
-    console.log("mUSDT Balance:", hre.ethers.utils.formatUnits(balance, 6), "mUSDT");
-    console.log("=".repeat(50) + "\n");
+  // Get MockStablecoin contract
+  const MockStablecoin = await hre.ethers.getContractFactory("MockStablecoin");
+  const mockStablecoin = MockStablecoin.attach(mockStablecoinAddress);
 
-    if (balance.eq(0)) {
-        console.log("❌ No mUSDT! You need mUSDT to fund loans.");
-        console.log("\n💡 The deployment minted mUSDT to the deployer.");
-        console.log("   Are you using the same account that deployed?");
-    } else {
-        console.log("✅ You have mUSDT to fund loans!");
-    }
+  // Check balance
+  const balance = await mockStablecoin.balanceOf(walletAddress);
+  const decimals = await mockStablecoin.decimals();
+  const formattedBalance = hre.ethers.utils.formatUnits(balance, decimals);
+
+  console.log(`Wallet: ${walletAddress}`);
+  console.log(`mUSDT Balance: ${formattedBalance} mUSDT\n`);
+
+  if (balance.eq(0)) {
+    console.log("⚠️  Balance is 0. Would you like to mint tokens?\n");
+  } else {
+    console.log("✅ Wallet has mUSDT tokens!\n");
+  }
 }
 
 main()
-    .then(() => process.exit(0))
-    .catch((error) => {
-        console.error(error);
-        process.exit(1);
-    });
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
