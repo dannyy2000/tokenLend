@@ -102,16 +102,29 @@ export async function getBusinessProfile(
 export async function uploadBusinessDocument(
   walletAddress: string,
   documentType: string,
-  documentUrl: string,
-  fileName: string
+  file: File
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
+    // Import dynamically to avoid circular dependencies
+    const { uploadToIPFS } = await import('../utils/ipfs');
+
+    // Upload file to IPFS first
+    const ipfsResult = await uploadToIPFS(file, walletAddress);
+
+    // Then save metadata to backend
     const response = await fetch(`${API_BASE_URL}/api/verification/upload-document`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ walletAddress, documentType, documentUrl, fileName })
+      body: JSON.stringify({
+        walletAddress,
+        documentType,
+        documentUrl: ipfsResult.url,
+        fileName: ipfsResult.fileName,
+        ipfsHash: ipfsResult.ipfsHash,
+        fileSize: ipfsResult.fileSize
+      })
     });
 
     const data = await response.json();

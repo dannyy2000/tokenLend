@@ -13,6 +13,7 @@ const valuationRoutes = require('./src/routes/valuation.routes');
 const assetRoutes = require('./src/routes/asset.routes');
 const loanRoutes = require('./src/routes/loan.routes');
 const verificationRoutes = require('./src/routes/verification');
+const uploadRoutes = require('./src/routes/upload.routes');
 
 // Middleware
 app.use(helmet()); // Security headers
@@ -48,6 +49,7 @@ app.use('/api/valuations', valuationRoutes);
 app.use('/api/assets', assetRoutes);
 app.use('/api/loans', loanRoutes);
 app.use('/api/verification', verificationRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // 404 handler
 app.use((req, res) => {

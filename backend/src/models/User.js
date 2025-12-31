@@ -74,8 +74,10 @@ const UserSchema = new mongoose.Schema({
         type: String,
         enum: ['cac_certificate', 'utility_bill', 'business_registration', 'tax_id', 'other']
       },
-      url: String, // IPFS hash or URL
+      url: String, // Public gateway URL
+      ipfsHash: String, // Raw IPFS hash (QmXxx...)
       fileName: String,
+      fileSize: Number, // File size in bytes
       uploadedAt: {
         type: Date,
         default: Date.now

@@ -92,7 +92,7 @@ exports.createBusinessProfile = async (req, res) => {
  */
 exports.uploadDocument = async (req, res) => {
   try {
-    const { walletAddress, documentType, documentUrl, fileName } = req.body;
+    const { walletAddress, documentType, documentUrl, fileName, ipfsHash, fileSize } = req.body;
 
     if (!walletAddress || !documentType || !documentUrl) {
       return res.status(400).json({
@@ -121,7 +121,9 @@ exports.uploadDocument = async (req, res) => {
     user.businessProfile.documents.push({
       type: documentType,
       url: documentUrl,
+      ipfsHash: ipfsHash || null,
       fileName: fileName || 'document',
+      fileSize: fileSize || null,
       uploadedAt: new Date()
     });
 

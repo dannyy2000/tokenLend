@@ -52,7 +52,9 @@ async function createValuation(req, res) {
 
     // Step 2: Analyze image with GPT Vision (use first image for now)
     console.log('🤖 Analyzing image with GPT Vision...');
-    const gptResult = await gptService.analyzeAssetImage(images[0], {
+    // Extract URL from image object if it's an object, otherwise use as-is (backwards compatibility)
+    const firstImageUrl = typeof images[0] === 'object' ? images[0].url : images[0];
+    const gptResult = await gptService.analyzeAssetImage(firstImageUrl, {
       assetType,
       brand,
       model,

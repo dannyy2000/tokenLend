@@ -79,17 +79,9 @@ export function AssetUploadFlow() {
         setIsLoading(true);
 
         try {
-            // Convert images to base64
-            const imagePromises = assetData.images?.map((file) => {
-                return new Promise<string>((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result as string);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(file);
-                });
-            }) || [];
-
-            const base64Images = await Promise.all(imagePromises);
+            // Upload images to IPFS
+            const { uploadMultipleToIPFS } = await import('@/lib/utils/ipfs');
+            const ipfsImages = await uploadMultipleToIPFS(assetData.images || []);
 
             // Call backend API for valuation
             const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/api/valuations`, {
@@ -104,7 +96,11 @@ export function AssetUploadFlow() {
                     variant: details.variant || '',
                     purchaseDate: details.purchaseDate,
                     serialNumber: details.serialNumber || '',
-                    images: base64Images,
+                    images: ipfsImages.map(img => ({
+                        url: img.url,
+                        ipfsHash: img.ipfsHash,
+                        fileSize: img.fileSize
+                    })),
                 }),
             });
 

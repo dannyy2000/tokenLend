@@ -36,7 +36,11 @@ const ValuationSchema = new mongoose.Schema({
       required: true
     },
     serialNumber: String,
-    images: [String], // URLs or IPFS hashes
+    images: [{
+      url: String, // Public gateway URL
+      ipfsHash: String, // Raw IPFS hash
+      fileSize: Number // File size in bytes
+    }],
     userCondition: {
       type: String,
       enum: ['excellent', 'good', 'fair', 'poor']
