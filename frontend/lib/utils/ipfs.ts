@@ -146,7 +146,7 @@ export function validateFile(
   }
 
   // Check file type
-  if (!allowedTypes.includes(file.mimetype || file.type)) {
+  if (!allowedTypes.includes(file.type)) {
     return {
       valid: false,
       error: 'Invalid file type. Allowed: JPG, PNG, WEBP, PDF, DOC, DOCX'
