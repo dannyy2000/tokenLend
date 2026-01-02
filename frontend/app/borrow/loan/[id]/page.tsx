@@ -213,7 +213,7 @@ export default function BorrowerLoanDetailPage() {
                         <div>
                             <div className="flex items-center gap-3 mb-2">
                                 <h1 className="text-4xl font-bold text-white">{loan.assetName}</h1>
-                                <Badge variant={getStatusColor(loan.status)} size="lg">
+                                <Badge variant={getStatusColor(loan.status)}>
                                     <span className="capitalize">{loan.status}</span>
                                 </Badge>
                             </div>
