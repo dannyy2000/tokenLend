@@ -2,15 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // Turbopack configuration for Next.js 16+
-  turbopack: {
-    resolveAlias: {
-      // Resolve fallbacks for node modules not available in browser
-      fs: false,
-      net: false,
-      tls: false,
-      crypto: false,
-    },
-  },
+  // Empty config acknowledges we're using Turbopack
+  turbopack: {},
 
   webpack: (config) => {
     // Resolve fallbacks for node modules not available in browser
