@@ -211,7 +211,17 @@ export async function getVerificationStatus(
  */
 export async function checkCanCreateLoan(
   walletAddress: string
-): Promise<{ success: boolean; canCreate?: boolean; reason?: string; data?: any }> {
+): Promise<{
+  success: boolean;
+  canCreate?: boolean;
+  reason?: string;
+  requiresAction?: string;
+  verificationStatus?: string;
+  hasBusinessProfile?: boolean;
+  message?: string;
+  verifiedAt?: string;
+  data?: any;
+}> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/loans/can-create/${walletAddress}`, {
       method: 'GET'
