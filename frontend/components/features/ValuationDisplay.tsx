@@ -558,7 +558,6 @@ export function ValuationDisplay({ valuation, isLoading, assetData }: ValuationD
             ) : (
                 <div className="flex flex-col sm:flex-row gap-4">
                     <LoadingButton
-                        size="lg"
                         className="flex-1"
                         onClick={handleShowCustomizeModal}
                         isLoading={step === 'minting' || step === 'creating'}
