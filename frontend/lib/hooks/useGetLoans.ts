@@ -5,6 +5,7 @@
 import { useReadContract, useAccount } from 'wagmi';
 import { LoanManagerABI, getContractAddresses } from '@/lib/contracts';
 import { useChainId } from 'wagmi';
+import type { Loan } from '@/lib/types/blockchain';
 
 /**
  * Hook to get a single loan by ID
@@ -24,7 +25,7 @@ export function useGetLoan(loanId: bigint | undefined) {
     });
 
     return {
-        loan: data,
+        loan: data as Loan | undefined,
         isLoading,
         isError,
         error,
