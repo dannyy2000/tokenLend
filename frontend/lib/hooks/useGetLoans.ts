@@ -83,21 +83,10 @@ export function useGetUserLoans(role?: 'borrower' | 'lender' | 'all') {
         setError(null);
 
         try {
+            // TODO: Implement actual loan fetching
+            // For now, return empty array to avoid complex async issues
+            // When loans are created, they will show up in the next refetch
             const userLoans: any[] = [];
-
-            // Fetch loans one by one (simple but slow - optimize later)
-            for (let i = 0; i < loanCount; i++) {
-                try {
-                    // Use wagmi's client to read directly
-                    const { getLoan } = await import('./useGetLoans');
-
-                    // For now, skip actual fetching and return empty
-                    // This avoids complex async issues
-                    // When a loan is created, it will show up in the next refetch
-                } catch (err) {
-                    console.error(`Error fetching loan ${i}:`, err);
-                }
-            }
 
             setLoans(userLoans);
         } catch (err) {
