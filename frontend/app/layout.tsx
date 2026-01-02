@@ -1,13 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import dynamic from "next/dynamic";
-
-// Dynamically import Providers with SSR disabled to prevent bundling WalletConnect/RainbowKit on server
-const Providers = dynamic(
-  () => import("./providers").then((mod) => ({ default: mod.Providers })),
-  { ssr: false }
-);
+import { Providers } from "./providers";
 
 const inter = Inter({
   subsets: ["latin"],
