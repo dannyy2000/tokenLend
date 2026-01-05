@@ -21,6 +21,20 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <script dangerouslySetInnerHTML={{__html: `
+          // Suppress wagmi ethereum provider error in development
+          if (typeof window !== 'undefined') {
+            const originalError = console.error;
+            console.error = (...args) => {
+              if (args[0]?.toString?.().includes('ethereum') && args[0]?.toString?.().includes('getter')) {
+                return; // Suppress this specific error
+              }
+              originalError.apply(console, args);
+            };
+          }
+        `}} />
+      </head>
       <body className={`${inter.className} ${inter.variable}`}>
         <Providers>
           {children}

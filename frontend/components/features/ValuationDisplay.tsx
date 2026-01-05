@@ -9,7 +9,7 @@ import { formatCurrency, formatPercentage } from '@/lib/utils/format';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { useMintAsset, useCreateLoan } from '@/lib/hooks';
+import { useCreateLoanWithMinting } from '@/lib/hooks';
 import { useAccount, useChainId, usePublicClient } from 'wagmi';
 import { getDefaultStablecoin, getStablecoinDecimals } from '@/lib/contracts';
 import { parseUnits } from 'viem';
@@ -26,201 +26,101 @@ export function ValuationDisplay({ valuation, isLoading, assetData }: ValuationD
     const { address, isConnected } = useAccount();
     const chainId = useChainId();
     const publicClient = usePublicClient();
-    const [step, setStep] = useState<'valuation' | 'minting' | 'creating' | 'complete'>('valuation');
-    const [mintedTokenId, setMintedTokenId] = useState<bigint | null>(null);
+    const [step, setStep] = useState<'valuation' | 'creating' | 'complete'>('valuation');
     const [loanId, setLoanId] = useState<bigint | null>(null);
+    const [tokenId, setTokenId] = useState<bigint | null>(null);
 
     // Loan customization state
     const [showCustomizeModal, setShowCustomizeModal] = useState(false);
     const [customPrincipal, setCustomPrincipal] = useState<number>(0);
     const [customDuration, setCustomDuration] = useState<number>(30);
 
-    // Mint asset hook
+    // Lazy minting hook - creates loan and mints NFT in one transaction
     const {
-        mintAsset,
-        isPending: isMintPending,
-        isConfirming: isMintConfirming,
-        isSuccess: isMintSuccess,
-        hash: mintHash,
-        error: mintError,
-    } = useMintAsset();
+        createLoanWithMinting,
+        isPending,
+        isConfirming,
+        isSuccess,
+        hash,
+        error,
+    } = useCreateLoanWithMinting();
 
-    // Create loan hook
-    const {
-        createLoan,
-        isPending: isLoanPending,
-        isConfirming: isLoanConfirming,
-        isSuccess: isLoanSuccess,
-        hash: loanHash,
-        error: loanError,
-    } = useCreateLoan();
-
-    // Watch for mint errors
+    // Watch for errors
     useEffect(() => {
-        if (mintError) {
-            console.error('❌ Mint error from hook:', mintError);
-            alert(`Minting failed: ${mintError.message}`);
+        if (error) {
+            console.error('❌ Loan creation error:', error);
+            alert(`Loan creation failed: ${error.message}`);
             setStep('valuation');
         }
-    }, [mintError]);
+    }, [error]);
 
-    // Watch for loan errors
+    // Watch for successful loan creation
     useEffect(() => {
-        if (loanError) {
-            console.error('❌ Loan error from hook:', loanError);
-            alert(`Loan creation failed: ${loanError.message}`);
-            setStep('valuation');
-        }
-    }, [loanError]);
+        if (isSuccess && step === 'creating' && hash) {
+            console.log('✅ Loan created successfully with lazy minting!');
+            console.log('Transaction hash:', hash);
 
-    // Watch for successful mint
-    useEffect(() => {
-        if (isMintSuccess && step === 'minting' && mintHash) {
-            console.log('✅ Asset minted successfully');
-            console.log('Mint hash:', mintHash);
-
-            // Get the token ID from the transaction receipt
-            const getTokenIdAndCreateLoan = async () => {
+            // Parse transaction receipt to get loan ID and token ID
+            const parseReceiptAndSync = async () => {
                 try {
-                    // Fetch the transaction receipt
-                    const receipt = await publicClient?.getTransactionReceipt({ hash: mintHash });
-
+                    const receipt = await publicClient?.getTransactionReceipt({ hash });
                     if (!receipt) {
-                        throw new Error('Failed to get transaction receipt');
+                        console.warn('⚠️ Could not get transaction receipt');
+                        setStep('complete');
+                        return;
                     }
 
                     console.log('📝 Transaction receipt:', receipt);
 
-                    // Parse the Transfer event to get the token ID
-                    // Transfer event signature: Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
-                    // The tokenId is the 3rd topic (index 2)
+                    // Parse LoanCreated event to get loan ID (first indexed param)
+                    const loanCreatedLog = receipt.logs.find((log) => log.topics.length === 4);
+                    const parsedLoanId = loanCreatedLog?.topics[1]
+                        ? BigInt(loanCreatedLog.topics[1])
+                        : BigInt(0);
+
+                    // Parse Transfer event to get token ID (from AssetToken mint)
                     const transferLog = receipt.logs.find(
                         (log) => log.topics[0] === '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
                     );
+                    const parsedTokenId = transferLog?.topics[3]
+                        ? BigInt(transferLog.topics[3])
+                        : BigInt(0);
 
-                    if (!transferLog || !transferLog.topics[3]) {
-                        // Fallback: use the first minted token (likely 0, 1, 2...)
-                        console.warn('⚠️ Could not find Transfer event, using fallback token ID');
-                        const fallbackTokenId = BigInt(0); // Start from 0
-                        setMintedTokenId(fallbackTokenId);
-                        setStep('creating');
-                        createLoanWithMintedAsset(fallbackTokenId);
-                        return;
-                    }
+                    console.log('📊 Parsed IDs:', { loanId: parsedLoanId.toString(), tokenId: parsedTokenId.toString() });
 
-                    // Token ID is in the 4th topic (index 3) as a uint256
-                    const tokenId = BigInt(transferLog.topics[3]);
-                    console.log('🎫 Minted Token ID:', tokenId.toString());
+                    setLoanId(parsedLoanId);
+                    setTokenId(parsedTokenId);
 
-                    setMintedTokenId(tokenId);
-                    setStep('creating');
-                    createLoanWithMintedAsset(tokenId);
-                } catch (err) {
-                    console.error('❌ Error getting token ID:', err);
-                    alert('Failed to get minted token ID. Please try creating the loan manually.');
-                    setStep('valuation');
-                }
-            };
-
-            getTokenIdAndCreateLoan();
-        }
-    }, [isMintSuccess, step, mintHash]);
-
-    // Watch for successful loan creation
-    useEffect(() => {
-        if (isLoanSuccess && step === 'creating' && loanHash && mintedTokenId !== null) {
-            console.log('✅ Loan created successfully on blockchain');
-            console.log('Loan hash:', loanHash);
-
-            // Sync loan to backend database
-            const syncToBackend = async () => {
-                try {
+                    // Sync to backend
                     const stablecoin = getDefaultStablecoin(chainId);
-                    if (!stablecoin) return;
-
-                    // Get transaction receipt to find the loan ID
-                    const receipt = await publicClient?.getTransactionReceipt({ hash: loanHash });
-                    if (!receipt) return;
-
-                    // Parse LoanCreated event to get loan ID
-                    // Event signature: LoanCreated(uint256 indexed loanId, address indexed borrower, address indexed lender, ...)
-                    // Event signature hash for LoanCreated(uint256,address,address,uint256,uint256,uint256,uint256)
-                    const loanCreatedEventSig = '0x8b9ce9b6e1e3b3b3e3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3'; // Placeholder
-
-                    // Find the LoanCreated event log
-                    const loanCreatedLog = receipt.logs.find((log) => {
-                        // Look for logs from the LoanManager contract with the expected topic count
-                        return log.topics.length === 4; // 1 event sig + 3 indexed params (loanId, borrower, lender)
-                    });
-
-                    // Parse loan ID from event or use fallback
-                    let loanId: number;
-                    if (!loanCreatedLog || !loanCreatedLog.topics[1]) {
-                        console.warn('⚠️ Could not find LoanCreated event, using token ID as fallback');
-                        loanId = Number(mintedTokenId);
-                    } else {
-                        // Parse loan ID from first indexed topic (topic[1])
-                        loanId = Number(BigInt(loanCreatedLog.topics[1]));
+                    if (stablecoin && address) {
+                        await loanAPI.createLoan({
+                            loanId: Number(parsedLoanId),
+                            borrower: address,
+                            assetTokenId: Number(parsedTokenId),
+                            principal: customPrincipal,
+                            interestRate: valuation.loanTerms.recommendedInterestRate || 1000,
+                            duration: customDuration,
+                            stablecoin,
+                            txHash: hash,
+                            blockNumber: Number(receipt.blockNumber),
+                            valuationId: valuation.valuationId,
+                            chainId
+                        });
+                        console.log('✅ Loan synced to backend');
                     }
-
-                    console.log('📊 Syncing loan to backend...', { loanId });
-
-                    await loanAPI.createLoan({
-                        loanId,
-                        borrower: address!,
-                        assetTokenId: Number(mintedTokenId),
-                        principal: customPrincipal,
-                        interestRate: valuation.loanTerms.recommendedInterestRate || 1000,
-                        duration: customDuration,
-                        stablecoin,
-                        txHash: loanHash,
-                        blockNumber: Number(receipt.blockNumber),
-                        valuationId: valuation.valuationId,
-                        chainId
-                    });
-
-                    console.log('✅ Loan synced to backend successfully');
                 } catch (err) {
-                    console.error('⚠️ Failed to sync loan to backend:', err);
-                    // Don't fail the UI if backend sync fails
+                    console.error('⚠️ Error parsing receipt or syncing:', err);
+                    // Don't fail the UI
+                } finally {
+                    setStep('complete');
                 }
             };
 
-            syncToBackend();
-            setStep('complete');
+            parseReceiptAndSync();
         }
-    }, [isLoanSuccess, step, loanHash, mintedTokenId]);
+    }, [isSuccess, step, hash]);
 
-    const createLoanWithMintedAsset = async (tokenId: bigint) => {
-        if (!valuation || !isConnected) return;
-
-        try {
-            const stablecoin = getDefaultStablecoin(chainId);
-            if (!stablecoin) {
-                alert('No stablecoin configured for this network');
-                return;
-            }
-
-            const decimals = getStablecoinDecimals(chainId, stablecoin);
-
-            // Use AI-recommended interest rate (borrower can't set their own rate)
-            const interestRateBasisPoints = valuation.loanTerms.recommendedInterestRate || 1000;
-
-            // Use customized principal and duration, but AI interest rate
-            await createLoan(
-                tokenId,
-                customPrincipal,
-                interestRateBasisPoints,
-                customDuration,
-                stablecoin,
-                decimals
-            );
-        } catch (err: any) {
-            console.error('Create loan error:', err);
-            alert(err.message || 'Loan creation failed');
-            setStep('valuation');
-        }
-    };
 
     const handleShowCustomizeModal = () => {
         if (!valuation || !isConnected) {
@@ -257,7 +157,7 @@ export function ValuationDisplay({ valuation, isLoading, assetData }: ValuationD
     };
 
     const handleCreateLoanWithAI = async () => {
-        console.log('🚀 Starting loan creation with AI valuation...');
+        console.log('🚀 Starting loan creation with lazy minting...');
         console.log('Connected:', isConnected, 'Address:', address);
         console.log('Valuation data:', valuation);
         console.log('Asset data:', assetData);
@@ -267,37 +167,52 @@ export function ValuationDisplay({ valuation, isLoading, assetData }: ValuationD
             return;
         }
 
-        setStep('minting');
+        setStep('creating');
 
         try {
-            // Step 1: Mint AssetToken NFT with AI valuation data
-            // Note: mintAsset expects raw number, it will convert to wei (18 decimals) internally
-            const aiValuationAmount = valuation.valuation.conditionAdjustedValue; // Raw Naira amount
-            const maxLTV = valuation.loanTerms.maxLTV; // Already in basis points
+            const stablecoin = getDefaultStablecoin(chainId);
+            if (!stablecoin) {
+                alert('No stablecoin configured for this network');
+                setStep('valuation');
+                return;
+            }
 
+            const decimals = getStablecoinDecimals(chainId, stablecoin);
+
+            // Prepare parameters
+            const aiValuationAmount = valuation.valuation.conditionAdjustedValue; // Raw value
+            const maxLTV = valuation.loanTerms.maxLTV; // Basis points
+            const interestRate = valuation.loanTerms.recommendedInterestRate || 1000;
             const tokenURI = `ipfs://valuation/${valuation.valuationId}`;
 
-            console.log('📝 Minting params:', {
+            console.log('📝 Lazy minting params:', {
                 assetType: assetData.assetType || 'smartphone',
                 aiValuation: aiValuationAmount,
-                maxLTV: maxLTV,
-                borrower: address,
-                uri: tokenURI
+                maxLTV,
+                uri: tokenURI,
+                principal: customPrincipal,
+                interestRate,
+                duration: customDuration,
+                stablecoin
             });
 
-            await mintAsset(
-                assetData.assetType || 'smartphone', // assetType
-                aiValuationAmount, // aiValuation (raw number)
-                maxLTV, // maxLTV
-                address!, // borrower
-                tokenURI // uri
+            // One transaction: Mint NFT + Create Loan
+            await createLoanWithMinting(
+                assetData.assetType || 'smartphone',
+                aiValuationAmount,
+                maxLTV,
+                tokenURI,
+                customPrincipal,
+                interestRate,
+                customDuration,
+                stablecoin,
+                decimals
             );
 
-            console.log('✅ Mint transaction sent!');
-            // Step 2 will be triggered by useEffect when mint succeeds
+            console.log('✅ Lazy minting transaction sent!');
         } catch (err: any) {
-            console.error('❌ Mint asset error:', err);
-            alert(err.message || 'Asset minting failed');
+            console.error('❌ Loan creation error:', err);
+            alert(err.message || 'Loan creation failed');
             setStep('valuation');
         }
     };
@@ -536,11 +451,11 @@ export function ValuationDisplay({ valuation, isLoading, assetData }: ValuationD
                             <p className="text-gray-400 mb-6">
                                 Your asset has been tokenized and your loan request is now live
                             </p>
-                            {loanHash && (
+                            {hash && (
                                 <div className="mb-6">
                                     <p className="text-sm text-gray-500 mb-2">Transaction Hash:</p>
                                     <code className="text-xs text-indigo-400 bg-slate-900/50 px-4 py-2 rounded-lg break-all block">
-                                        {loanHash}
+                                        {hash}
                                     </code>
                                 </div>
                             )}
@@ -560,11 +475,10 @@ export function ValuationDisplay({ valuation, isLoading, assetData }: ValuationD
                     <LoadingButton
                         className="flex-1"
                         onClick={handleShowCustomizeModal}
-                        isLoading={step === 'minting' || step === 'creating'}
+                        isLoading={step === 'creating'}
                         disabled={!isConnected || step !== 'valuation'}
                     >
-                        {step === 'minting' && 'Minting Asset NFT...'}
-                        {step === 'creating' && 'Creating Loan Request...'}
+                        {step === 'creating' && 'Creating Loan (Minting NFT + Creating Loan)...'}
                         {step === 'valuation' && '🚀 Create Loan with AI Valuation'}
                     </LoadingButton>
                     <Link href="/borrow/upload" className="flex-1">

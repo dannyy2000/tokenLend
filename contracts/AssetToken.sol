@@ -40,6 +40,7 @@ contract AssetToken is ERC721, ERC721URIStorage, Ownable {
 
     /**
      * @dev Mint a new asset token with AI valuation data
+     * Can be called by owner or authorized managers (e.g., LoanManager for lazy minting)
      */
     function mintAsset(
         address borrower,
@@ -47,7 +48,12 @@ contract AssetToken is ERC721, ERC721URIStorage, Ownable {
         uint256 aiValuation,
         uint256 maxLTV,
         string memory uri
-    ) external onlyOwner returns (uint256) {
+    ) external returns (uint256) {
+        // Allow owner or authorized managers (like LoanManager) to mint
+        require(
+            msg.sender == owner() || authorizedManagers[msg.sender],
+            "Not authorized to mint"
+        );
         require(borrower != address(0), "Invalid borrower address");
         require(aiValuation > 0, "Valuation must be greater than 0");
         require(maxLTV > 0 && maxLTV <= 10000, "Invalid LTV ratio");

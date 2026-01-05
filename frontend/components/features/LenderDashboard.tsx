@@ -14,7 +14,7 @@ import { TrendingUp, Wallet, DollarSign, AlertCircle, CheckCircle2, Clock, Eye, 
 import Link from 'next/link';
 import { useAccount, useChainId, usePublicClient } from 'wagmi';
 import { useFundLoan } from '@/lib/hooks';
-import { getDefaultStablecoin, getStablecoinDecimals, getContractAddresses } from '@/lib/contracts';
+import { getDefaultStablecoin, getStablecoinDecimals, getContractAddresses, LoanManagerABI } from '@/lib/contracts';
 import { parseUnits } from 'viem';
 import * as loanAPI from '@/lib/api/loans';
 import { getLenderProfile } from '@/lib/api/verification';
@@ -85,77 +85,147 @@ export function LenderDashboard() {
         error,
     } = useFundLoan();
 
-    // Fetch available loans from backend
+    // Fetch available loans from blockchain
     const fetchAvailableLoans = async () => {
+        if (!addresses?.loanManager) return;
+
         try {
             setIsLoadingAvailable(true);
-            const response = await loanAPI.getAvailableLoans(20);
+            console.log('📡 Fetching available loans from blockchain...');
 
-            if (response.success && response.loans) {
-                const formattedLoans: LoanRequest[] = response.loans.map((loan: any) => {
-                    // Calculate LTV from principal and estimated asset value
-                    const estimatedAssetValue = loan.principal * 1.5; // Rough estimate
-                    const ltv = (loan.principal / estimatedAssetValue) * 100;
+            const { readContract } = await import('wagmi/actions');
+            const { config } = await import('@/lib/web3/config');
+            const { formatUnits } = await import('viem');
+
+            // Try fetching loan IDs 0-99 (reasonable range for hackathon)
+            // Filter out any that don't exist
+            const MAX_LOANS = 100;
+            const loanPromises = [];
+
+            for (let i = 0; i < MAX_LOANS; i++) {
+                loanPromises.push(
+                    readContract(config, {
+                        address: addresses.loanManager,
+                        abi: LoanManagerABI.abi,
+                        functionName: 'getLoan',
+                        args: [BigInt(i)],
+                    }).catch(() => null) // Return null if loan doesn't exist
+                );
+            }
+
+            const allLoansRaw = await Promise.all(loanPromises);
+            // Filter out null values (non-existent loans)
+            const allLoans = allLoansRaw.filter(loan => loan !== null);
+
+            // Filter for active loans (lender is zero address) and exclude current user's loans
+            const activeLoans = allLoans
+                .filter((loan: any) => {
+                    const isActive = loan.lender === '0x0000000000000000000000000000000000000000';
+                    const isNotMyLoan = !address || loan.borrower.toLowerCase() !== address.toLowerCase();
+                    return isActive && isNotMyLoan;
+                })
+                .map((loan: any) => {
+                    // Calculate LTV estimate
+                    const principalNum = Number(formatUnits(loan.principal, 6));
+                    const estimatedAssetValue = principalNum * 2; // Rough estimate based on typical LTV
+                    const ltv = (principalNum / estimatedAssetValue) * 100;
 
                     return {
                         id: loan.loanId.toString(),
                         borrower: `${loan.borrower.slice(0, 6)}...${loan.borrower.slice(-4)}`,
-                        assetType: loan.assetType || 'asset',
-                        assetName: `Asset #${loan.assetTokenId}`,
+                        assetType: 'asset',
+                        assetName: `Asset #${loan.assetTokenId.toString()}`,
                         assetValue: estimatedAssetValue,
-                        requestedAmount: loan.principal,
-                        interestRate: loan.interestRate / 100,
-                        duration: loan.duration,
+                        requestedAmount: principalNum,
+                        interestRate: Number(loan.interestRate) / 100,
+                        duration: Number(loan.duration) / (24 * 60 * 60),
                         ltv,
-                        createdAt: new Date(loan.createdAt).toISOString().split('T')[0],
+                        createdAt: new Date().toISOString().split('T')[0], // We don't have creation time on-chain
                         status: 'active' as const,
                     };
                 });
 
-                setAvailableLoans(formattedLoans);
-            }
+            console.log(`✅ Found ${activeLoans.length} available loans`);
+            setAvailableLoans(activeLoans);
         } catch (err) {
-            console.error('Failed to fetch available loans:', err);
+            console.error('❌ Failed to fetch available loans:', err);
+            setAvailableLoans([]);
         } finally {
             setIsLoadingAvailable(false);
         }
     };
 
-    // Fetch funded loans from backend
+    // Fetch funded loans from blockchain
     const fetchFundedLoans = async () => {
-        if (!address) return;
+        if (!address || !addresses?.loanManager) return;
 
         try {
             setIsLoadingFunded(true);
-            const response = await loanAPI.getLenderLoans(address);
+            console.log('📡 Fetching funded loans from blockchain...');
 
-            if (response.success && response.loans) {
-                const formattedLoans: FundedLoan[] = response.loans.map((loan: any) => {
-                    const startDate = loan.fundedAt ? new Date(loan.fundedAt) : null;
-                    const dueDate = startDate
-                        ? new Date(startDate.getTime() + loan.duration * 24 * 60 * 60 * 1000)
+            const { readContract } = await import('wagmi/actions');
+            const { config } = await import('@/lib/web3/config');
+            const { formatUnits } = await import('viem');
+
+            // Try fetching loan IDs 0-99 (reasonable range for hackathon)
+            const MAX_LOANS = 100;
+            const loanPromises = [];
+
+            for (let i = 0; i < MAX_LOANS; i++) {
+                loanPromises.push(
+                    readContract(config, {
+                        address: addresses.loanManager,
+                        abi: LoanManagerABI.abi,
+                        functionName: 'getLoan',
+                        args: [BigInt(i)],
+                    }).catch(() => null) // Return null if loan doesn't exist
+                );
+            }
+
+            const allLoansRaw = await Promise.all(loanPromises);
+            const allLoans = allLoansRaw.filter(loan => loan !== null);
+
+            // Filter for loans where current user is the lender
+            const myFundedLoans = allLoans
+                .filter((loan: any) => {
+                    return loan.lender.toLowerCase() === address.toLowerCase();
+                })
+                .map((loan: any) => {
+                    const startDate = loan.startTime > 0n
+                        ? new Date(Number(loan.startTime) * 1000)
                         : null;
+                    const dueDate = startDate && loan.duration
+                        ? new Date(startDate.getTime() + Number(loan.duration) * 1000)
+                        : null;
+
+                    // Determine status based on repayment
+                    let status: 'active' | 'repaid' | 'defaulted' = 'active';
+                    if (loan.amountRepaid >= loan.totalRepayment) {
+                        status = 'repaid';
+                    }
+                    // TODO: Check if loan is defaulted based on due date
 
                     return {
                         id: loan.loanId.toString(),
                         borrower: `${loan.borrower.slice(0, 6)}...${loan.borrower.slice(-4)}`,
-                        assetType: loan.assetType || 'asset',
-                        assetName: `Asset #${loan.assetTokenId}`,
-                        principal: loan.principal,
-                        totalRepayment: loan.totalRepayment,
-                        amountRepaid: loan.amountRepaid || 0,
-                        interestRate: loan.interestRate / 100,
-                        duration: loan.duration,
+                        assetType: 'asset',
+                        assetName: `Asset #${loan.assetTokenId.toString()}`,
+                        principal: Number(formatUnits(loan.principal, 6)),
+                        totalRepayment: Number(formatUnits(loan.totalRepayment, 6)),
+                        amountRepaid: Number(formatUnits(loan.amountRepaid, 6)),
+                        interestRate: Number(loan.interestRate) / 100,
+                        duration: Number(loan.duration) / (24 * 60 * 60),
                         startDate: startDate ? startDate.toISOString().split('T')[0] : '',
                         dueDate: dueDate ? dueDate.toISOString().split('T')[0] : '',
-                        status: loan.status as 'active' | 'repaid' | 'defaulted',
+                        status,
                     };
                 });
 
-                setFundedLoans(formattedLoans);
-            }
+            console.log(`✅ Found ${myFundedLoans.length} funded loans`);
+            setFundedLoans(myFundedLoans);
         } catch (err) {
-            console.error('Failed to fetch funded loans:', err);
+            console.error('❌ Failed to fetch funded loans:', err);
+            setFundedLoans([]);
         } finally {
             setIsLoadingFunded(false);
         }

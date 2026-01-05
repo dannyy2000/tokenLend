@@ -11,9 +11,9 @@ import { formatCurrency, formatDate } from '@/lib/utils/format';
 import { TrendingUp, Wallet, Clock, Plus, AlertCircle, CheckCircle2, XCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { useAccount, useChainId, usePublicClient } from 'wagmi';
-import { useRepayLoan } from '@/lib/hooks';
-import { getDefaultStablecoin, getStablecoinDecimals, getContractAddresses } from '@/lib/contracts';
-import { parseUnits } from 'viem';
+import { useRepayLoan, useGetUserLoans, useGetAsset } from '@/lib/hooks';
+import { getDefaultStablecoin, getStablecoinDecimals, getContractAddresses, LoanManagerABI } from '@/lib/contracts';
+import { parseUnits, formatUnits } from 'viem';
 import * as loanAPI from '@/lib/api/loans';
 import { checkCanCreateLoan } from '@/lib/api/verification';
 
@@ -93,44 +93,74 @@ export function BorrowerDashboard() {
         }
     };
 
-    // Fetch loans from backend
+    // Fetch loans from blockchain (source of truth)
     const fetchLoans = async () => {
-        if (!address) return;
+        if (!address || !addresses?.loanManager) return;
 
         try {
             setIsLoadingLoans(true);
-            const response = await loanAPI.getBorrowerLoans(address);
 
-            if (response.success && response.loans) {
-                // Convert backend loans to UI format
-                const formattedLoans: Loan[] = response.loans.map((loan: any) => {
-                    const startDate = loan.fundedAt ? new Date(loan.fundedAt) : null;
-                    const dueDate = startDate
-                        ? new Date(startDate.getTime() + loan.duration * 24 * 60 * 60 * 1000)
-                        : null;
+            // Always fetch from blockchain as source of truth
+            console.log('📡 Fetching loans from blockchain...');
+            const { readContract } = await import('wagmi/actions');
+            const { config } = await import('@/lib/web3/config');
 
-                    return {
-                        id: loan.loanId.toString(),
-                        assetType: loan.assetType || 'asset',
-                        assetName: `Asset #${loan.assetTokenId}`,
-                        principal: loan.principal,
-                        totalRepayment: loan.totalRepayment,
-                        amountRepaid: loan.amountRepaid || 0,
-                        interestRate: loan.interestRate / 100,
-                        duration: loan.duration,
-                        startDate: startDate ? startDate.toISOString().split('T')[0] : '',
-                        dueDate: dueDate ? dueDate.toISOString().split('T')[0] : '',
-                        status: loan.status as 'active' | 'funded' | 'repaid' | 'defaulted',
-                        lender: loan.lender
-                            ? `${loan.lender.slice(0, 6)}...${loan.lender.slice(-4)}`
-                            : undefined,
-                    };
-                });
+            // Get borrower's loan IDs
+            const borrowerLoanIds = await readContract(config, {
+                address: addresses.loanManager,
+                abi: LoanManagerABI.abi,
+                functionName: 'getBorrowerLoans',
+                args: [address],
+            }) as bigint[];
 
-                setLoans(formattedLoans);
+            console.log('📋 Found loan IDs:', borrowerLoanIds.map(id => id.toString()));
+
+            if (borrowerLoanIds.length === 0) {
+                console.log('ℹ️ No loans found on blockchain');
+                setLoans([]);
+                return;
             }
+
+            // Fetch each loan's details
+            const loanPromises = borrowerLoanIds.map(async (loanId) => {
+                const loanData = await readContract(config, {
+                    address: addresses.loanManager,
+                    abi: LoanManagerABI.abi,
+                    functionName: 'getLoan',
+                    args: [loanId],
+                }) as any;
+
+                const startDate = loanData.startTime > 0n
+                    ? new Date(Number(loanData.startTime) * 1000)
+                    : null;
+                const dueDate = startDate && loanData.duration
+                    ? new Date(startDate.getTime() + Number(loanData.duration) * 1000)
+                    : null;
+
+                return {
+                    id: loanId.toString(),
+                    assetType: 'asset',
+                    assetName: `Asset #${loanData.assetTokenId.toString()}`,
+                    principal: Number(formatUnits(loanData.principal || 0n, 6)),
+                    totalRepayment: Number(formatUnits(loanData.totalRepayment || 0n, 6)),
+                    amountRepaid: Number(formatUnits(loanData.amountRepaid || 0n, 6)),
+                    interestRate: Number(loanData.interestRate || 0n) / 100,
+                    duration: Number(loanData.duration || 0n) / (24 * 60 * 60),
+                    startDate: startDate ? startDate.toISOString().split('T')[0] : '',
+                    dueDate: dueDate ? dueDate.toISOString().split('T')[0] : '',
+                    status: loanData.lender !== '0x0000000000000000000000000000000000000000' ? 'funded' : 'active',
+                    lender: loanData.lender !== '0x0000000000000000000000000000000000000000'
+                        ? `${loanData.lender.slice(0, 6)}...${loanData.lender.slice(-4)}`
+                        : undefined,
+                };
+            });
+
+            const fetchedLoans = await Promise.all(loanPromises);
+            console.log('✅ Fetched loans from blockchain:', fetchedLoans);
+            setLoans(fetchedLoans);
         } catch (err) {
-            console.error('Failed to fetch loans:', err);
+            console.error('❌ Failed to fetch loans:', err);
+            setLoans([]);
         } finally {
             setIsLoadingLoans(false);
         }

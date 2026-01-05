@@ -6,6 +6,7 @@
 // Contract interaction hooks (write operations)
 export { useMintAsset } from './useMintAsset';
 export { useCreateLoan } from './useCreateLoan';
+export { useCreateLoanWithMinting } from './useCreateLoanWithMinting';
 export { useFundLoan } from './useFundLoan';
 export { useRepayLoan } from './useRepayLoan';
 

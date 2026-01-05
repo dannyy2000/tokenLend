@@ -73,7 +73,7 @@ export function useGetUserLoans(role?: 'borrower' | 'lender' | 'all') {
     const [error, setError] = React.useState<Error | null>(null);
 
     const fetchUserLoans = React.useCallback(async () => {
-        if (!addresses?.loanManager || !address || loanCount === 0 || isLoadingCount) {
+        if (!addresses?.loanManager || !address || isLoadingCount) {
             setLoans([]);
             setIsLoading(false);
             return;
@@ -83,15 +83,45 @@ export function useGetUserLoans(role?: 'borrower' | 'lender' | 'all') {
         setError(null);
 
         try {
-            // TODO: Implement actual loan fetching
-            // For now, return empty array to avoid complex async issues
-            // When loans are created, they will show up in the next refetch
-            const userLoans: any[] = [];
+            // Use wagmi's readContract to fetch borrower's loan IDs
+            const { readContract } = await import('wagmi/actions');
+            const { config } = await import('@/lib/web3/config');
 
-            setLoans(userLoans);
+            // Get borrower's loan IDs from contract
+            const borrowerLoanIds = await readContract(config, {
+                address: addresses.loanManager,
+                abi: LoanManagerABI.abi,
+                functionName: 'getBorrowerLoans',
+                args: [address],
+            }) as bigint[];
+
+            console.log('📋 Borrower loan IDs:', borrowerLoanIds);
+
+            // Fetch each loan's details
+            const loanPromises = borrowerLoanIds.map(async (loanId) => {
+                try {
+                    const loanData = await readContract(config, {
+                        address: addresses.loanManager,
+                        abi: LoanManagerABI.abi,
+                        functionName: 'getLoan',
+                        args: [loanId],
+                    });
+                    return loanData;
+                } catch (err) {
+                    console.error(`Error fetching loan ${loanId}:`, err);
+                    return null;
+                }
+            });
+
+            const fetchedLoans = await Promise.all(loanPromises);
+            const validLoans = fetchedLoans.filter(loan => loan !== null);
+
+            console.log('✅ Fetched loans:', validLoans);
+            setLoans(validLoans);
         } catch (err) {
             setError(err as Error);
             console.error('Fetch user loans error:', err);
+            setLoans([]);
         } finally {
             setIsLoading(false);
         }

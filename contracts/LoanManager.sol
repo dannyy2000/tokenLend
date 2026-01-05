@@ -183,6 +183,86 @@ contract LoanManager is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @dev Create a loan with lazy minting - mints asset NFT and creates loan in one transaction
+     * @param assetType Type of asset (e.g., "smartphone", "car", "laptop")
+     * @param aiValuation AI-determined asset value (scaled by 1e18)
+     * @param maxLTV Maximum loan-to-value ratio in basis points
+     * @param uri IPFS or metadata URI for the asset
+     * @param principal The amount to borrow
+     * @param interestRate Annual interest rate in basis points
+     * @param duration Loan duration in seconds
+     * @param stablecoin Address of stablecoin to borrow
+     */
+    function createLoanWithMinting(
+        string memory assetType,
+        uint256 aiValuation,
+        uint256 maxLTV,
+        string memory uri,
+        uint256 principal,
+        uint256 interestRate,
+        uint256 duration,
+        address stablecoin
+    ) external nonReentrant returns (uint256 loanId, uint256 tokenId) {
+        require(supportedStablecoins[stablecoin], "Stablecoin not supported");
+        require(principal > 0, "Principal must be greater than 0");
+        require(duration > 0, "Duration must be greater than 0");
+        require(interestRate <= 10000, "Interest rate too high"); // Max 100%
+
+        // Step 1: Mint the asset NFT to the borrower
+        tokenId = assetToken.mintAsset(
+            msg.sender,  // Borrower gets the NFT
+            assetType,
+            aiValuation,
+            maxLTV,
+            uri
+        );
+
+        // Step 2: Verify loan amount doesn't exceed max LTV
+        uint256 maxLoanAmount = assetToken.getMaxLoanAmount(tokenId);
+        require(principal <= maxLoanAmount, "Loan exceeds max LTV");
+
+        // Step 3: Calculate total repayment (principal + interest)
+        uint256 interest = (principal * interestRate * duration) / (10000 * 365 days);
+        uint256 totalRepayment = principal + interest;
+
+        // Step 4: Create the loan
+        loanId = _nextLoanId++;
+
+        loans[loanId] = Loan({
+            loanId: loanId,
+            borrower: msg.sender,
+            lender: address(0), // Will be set when funded
+            assetTokenId: tokenId,
+            principal: principal,
+            interestRate: interestRate,
+            duration: duration,
+            startTime: 0, // Will be set when funded
+            totalRepayment: totalRepayment,
+            amountRepaid: 0,
+            status: LoanStatus.Active,
+            stablecoin: stablecoin
+        });
+
+        borrowerLoans[msg.sender].push(loanId);
+        assetToLoan[tokenId] = loanId;
+
+        // Step 5: Lock the asset as collateral
+        assetToken.lockAsset(tokenId, loanId);
+
+        emit LoanCreated(
+            loanId,
+            msg.sender,
+            address(0),
+            tokenId,
+            principal,
+            interestRate,
+            duration
+        );
+
+        return (loanId, tokenId);
+    }
+
+    /**
      * @dev Fund a loan (called by lender)
      */
     function fundLoan(uint256 loanId) external nonReentrant {

@@ -27,9 +27,9 @@ export const CONTRACTS: Record<number, ContractAddresses> = {
 
     // Mantle Sepolia Testnet
     5003: {
-        assetToken: '0xC1B27b3088E42DDa3ec1e6cFDAF75326eF119d9b',
-        loanManager: '0xe3f280493a9F02336B618Ef4d5Bd76a71a642150',
-        mockStablecoin: '0x458Bc92f5dA2527475D63B3fEb56fC9085F82128',
+        assetToken: '0x7Dd04D485d031395C7e251126C231f09bc00B356',
+        loanManager: '0xD9EbE9a52F3eDE0ff534cB286d63Daac14d695C5',
+        mockStablecoin: '0x54aF4970919944464beFD9244F4Ff9f16dCc2365',
     },
 
     // Mantle Mainnet
