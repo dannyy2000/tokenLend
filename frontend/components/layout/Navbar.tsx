@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { Button } from '../ui/Button';
 import { VerificationBadge, LenderBadge } from '../ui/VerificationBadge';
-import { Wallet, Menu, X, ChevronDown } from 'lucide-react';
+import { Wallet, Menu, X, ChevronDown, Coins } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAccount } from 'wagmi';
 import { getVerificationStatus } from '@/lib/api/verification';
@@ -68,6 +68,13 @@ export function Navbar() {
                             className="text-gray-300 hover:text-white transition-colors font-medium px-3 py-2 rounded-lg hover:bg-slate-800/50"
                         >
                             Lend
+                        </Link>
+                        <Link
+                            href="/faucet"
+                            className="text-emerald-400 hover:text-emerald-300 transition-colors font-medium px-3 py-2 rounded-lg hover:bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2"
+                        >
+                            <Coins className="w-4 h-4" />
+                            Get Test USDT
                         </Link>
 
                         {/* Show verification badges when connected */}
@@ -138,6 +145,14 @@ export function Navbar() {
                             onClick={() => setMobileMenuOpen(false)}
                         >
                             Lend
+                        </Link>
+                        <Link
+                            href="/faucet"
+                            className="text-emerald-400 hover:text-emerald-300 transition-colors font-medium px-4 py-3 rounded-lg hover:bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-2"
+                            onClick={() => setMobileMenuOpen(false)}
+                        >
+                            <Coins className="w-4 h-4" />
+                            Get Test USDT
                         </Link>
 
                         {/* Quick access to onboarding if not verified */}
