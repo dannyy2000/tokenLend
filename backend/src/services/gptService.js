@@ -1,4 +1,5 @@
 const OpenAI = require('openai');
+const axios = require('axios');
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -6,19 +7,61 @@ const openai = new OpenAI({
 });
 
 /**
+ * Download image from URL and convert to base64
+ * @param {string} imageUrl - URL of the image
+ * @returns {Promise<string>} Base64 encoded image with data URI prefix
+ */
+async function downloadImageAsBase64(imageUrl) {
+  try {
+    const response = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      timeout: 30000, // 30 second timeout
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    const base64 = Buffer.from(response.data, 'binary').toString('base64');
+    const contentType = response.headers['content-type'] || 'image/jpeg';
+
+    return `data:${contentType};base64,${base64}`;
+  } catch (error) {
+    console.error('Failed to download image:', error.message);
+    throw new Error(`Failed to download image: ${error.message}`);
+  }
+}
+
+/**
  * Analyze asset image using GPT Vision API
- * @param {string} imageUrl - URL of the asset image
+ * @param {string} imageUrl - URL of the asset image (can be http/https URL or base64)
  * @param {Object} userInput - User-provided asset details
  * @returns {Promise<Object>} AI assessment
  */
 async function analyzeAssetImage(imageUrl, userInput) {
   const { assetType, brand, model, purchaseDate } = userInput;
 
+  // Download image and convert to base64 for reliable GPT processing
+  let imageContent;
+  if (imageUrl.startsWith('data:image')) {
+    // Already base64
+    console.log('📷 Using provided base64 image');
+    imageContent = { type: "image_url", image_url: { url: imageUrl } };
+  } else {
+    // Download from URL and convert to base64
+    console.log('📥 Downloading image from IPFS...');
+    try {
+      const base64Image = await downloadImageAsBase64(imageUrl);
+      console.log('✅ Image downloaded and converted to base64');
+      imageContent = { type: "image_url", image_url: { url: base64Image } };
+    } catch (error) {
+      console.error('❌ Failed to download image, trying URL directly...');
+      // Fallback to URL if download fails
+      imageContent = { type: "image_url", image_url: { url: imageUrl, detail: "high" } };
+    }
+  }
+
   const prompt = `
 You are an expert asset valuator. Analyze this image and provide a detailed assessment.
-
-IMAGE URL: ${imageUrl} 
-
 
 USER INPUT:
 - Asset Type: ${assetType}
@@ -62,30 +105,45 @@ Be conservative in your assessment. If uncertain, lower the condition score.
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4-vision-preview",
+      model: "gpt-4o",
       messages: [
+        {
+          role: "system",
+          content: "You are an expert asset valuator. Always respond with valid JSON only, no additional text."
+        },
         {
           role: "user",
           content: [
             { type: "text", text: prompt },
-            {
-              type: "image_url",
-              image_url: {
-                url: imageUrl,
-                detail: "high"
-              }
-            }
+            imageContent
           ]
         }
       ],
+      response_format: { type: "json_object" }, // Force JSON response
       max_tokens: 500,
       temperature: 0.3  // Lower temperature for more consistent results
     });
 
     const content = response.choices[0].message.content;
 
+    console.log('🤖 GPT Response received, parsing JSON...');
+
     // Parse JSON response
-    const aiAssessment = JSON.parse(content);
+    let aiAssessment;
+    try {
+      aiAssessment = JSON.parse(content);
+    } catch (parseError) {
+      console.error('❌ Failed to parse GPT response as JSON');
+      console.error('Raw response:', content.substring(0, 200)); // Log first 200 chars
+      throw new Error(`Invalid JSON from GPT: ${content.substring(0, 100)}...`);
+    }
+
+    // Log what AI detected
+    console.log(`🔍 AI Detection:`);
+    console.log(`   Detected: ${aiAssessment.detectedBrand} ${aiAssessment.detectedModel}`);
+    console.log(`   User Said: ${userInput.brand} ${userInput.model}`);
+    console.log(`   Match: ${aiAssessment.matches ? '✅' : '❌'}`);
+    console.log(`   Confidence: ${(aiAssessment.confidence * 100).toFixed(1)}%`);
 
     // Validate condition score is within range
     if (aiAssessment.conditionScore < 0 || aiAssessment.conditionScore > 1) {
@@ -169,5 +227,6 @@ async function analyzeMultipleImages(imageUrls, userInput) {
 
 module.exports = {
   analyzeAssetImage,
-  analyzeMultipleImages
+  analyzeMultipleImages,
+  downloadImageAsBase64
 };

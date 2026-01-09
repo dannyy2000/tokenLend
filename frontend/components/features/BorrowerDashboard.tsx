@@ -137,19 +137,32 @@ export function BorrowerDashboard() {
                     ? new Date(startDate.getTime() + Number(loanData.duration) * 1000)
                     : null;
 
+                const principal = Number(formatUnits(loanData.principal || 0n, 6));
+                const totalRepayment = Number(formatUnits(loanData.totalRepayment || 0n, 6));
+                const amountRepaid = Number(formatUnits(loanData.amountRepaid || 0n, 6));
+                const hasLender = loanData.lender !== '0x0000000000000000000000000000000000000000';
+
+                // Determine status based on repayment
+                let status: 'active' | 'funded' | 'repaid' | 'defaulted' = 'active';
+                if (amountRepaid >= totalRepayment && totalRepayment > 0) {
+                    status = 'repaid';
+                } else if (hasLender) {
+                    status = 'funded';
+                }
+
                 return {
                     id: loanId.toString(),
                     assetType: 'asset',
                     assetName: `Asset #${loanData.assetTokenId.toString()}`,
-                    principal: Number(formatUnits(loanData.principal || 0n, 6)),
-                    totalRepayment: Number(formatUnits(loanData.totalRepayment || 0n, 6)),
-                    amountRepaid: Number(formatUnits(loanData.amountRepaid || 0n, 6)),
+                    principal,
+                    totalRepayment,
+                    amountRepaid,
                     interestRate: Number(loanData.interestRate || 0n) / 100,
                     duration: Number(loanData.duration || 0n) / (24 * 60 * 60),
                     startDate: startDate ? startDate.toISOString().split('T')[0] : '',
                     dueDate: dueDate ? dueDate.toISOString().split('T')[0] : '',
-                    status: loanData.lender !== '0x0000000000000000000000000000000000000000' ? 'funded' : 'active',
-                    lender: loanData.lender !== '0x0000000000000000000000000000000000000000'
+                    status,
+                    lender: hasLender
                         ? `${loanData.lender.slice(0, 6)}...${loanData.lender.slice(-4)}`
                         : undefined,
                 };
@@ -547,6 +560,19 @@ export function BorrowerDashboard() {
                                         {loan.status === 'active' && (
                                             <div className="text-right">
                                                 <p className="text-sm text-gray-400 mb-2">Waiting for lender</p>
+                                                <Link href={`/borrow/loan/${loan.id}`}>
+                                                    <Button size="sm" variant="outline">
+                                                        View Details
+                                                    </Button>
+                                                </Link>
+                                            </div>
+                                        )}
+                                        {loan.status === 'repaid' && (
+                                            <div className="text-right">
+                                                <p className="text-sm text-green-400 mb-2 font-semibold">✅ Fully Repaid</p>
+                                                <p className="text-xs text-gray-400 mb-2">
+                                                    Repaid: {formatCurrency(loan.amountRepaid)}
+                                                </p>
                                                 <Link href={`/borrow/loan/${loan.id}`}>
                                                     <Button size="sm" variant="outline">
                                                         View Details

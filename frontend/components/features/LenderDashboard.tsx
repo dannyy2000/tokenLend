@@ -114,8 +114,12 @@ export function LenderDashboard() {
             }
 
             const allLoansRaw = await Promise.all(loanPromises);
-            // Filter out null values (non-existent loans)
-            const allLoans = allLoansRaw.filter(loan => loan !== null);
+            // Filter out null values and empty loans (borrower = zero address means loan doesn't exist)
+            const allLoans = allLoansRaw.filter((loan: any) =>
+                loan !== null && loan.borrower !== '0x0000000000000000000000000000000000000000'
+            );
+
+            console.log(`📊 Found ${allLoans.length} total loans in system`);
 
             // Filter for active loans (lender is zero address) and exclude current user's loans
             const activeLoans = allLoans
@@ -183,7 +187,10 @@ export function LenderDashboard() {
             }
 
             const allLoansRaw = await Promise.all(loanPromises);
-            const allLoans = allLoansRaw.filter(loan => loan !== null);
+            // Filter out null values and empty loans (borrower = zero address means loan doesn't exist)
+            const allLoans = allLoansRaw.filter((loan: any) =>
+                loan !== null && loan.borrower !== '0x0000000000000000000000000000000000000000'
+            );
 
             // Filter for loans where current user is the lender
             const myFundedLoans = allLoans
@@ -198,9 +205,13 @@ export function LenderDashboard() {
                         ? new Date(startDate.getTime() + Number(loan.duration) * 1000)
                         : null;
 
+                    const principal = Number(formatUnits(loan.principal, 6));
+                    const totalRepayment = Number(formatUnits(loan.totalRepayment, 6));
+                    const amountRepaid = Number(formatUnits(loan.amountRepaid, 6));
+
                     // Determine status based on repayment
                     let status: 'active' | 'repaid' | 'defaulted' = 'active';
-                    if (loan.amountRepaid >= loan.totalRepayment) {
+                    if (amountRepaid >= totalRepayment && totalRepayment > 0) {
                         status = 'repaid';
                     }
                     // TODO: Check if loan is defaulted based on due date
@@ -210,9 +221,9 @@ export function LenderDashboard() {
                         borrower: `${loan.borrower.slice(0, 6)}...${loan.borrower.slice(-4)}`,
                         assetType: 'asset',
                         assetName: `Asset #${loan.assetTokenId.toString()}`,
-                        principal: Number(formatUnits(loan.principal, 6)),
-                        totalRepayment: Number(formatUnits(loan.totalRepayment, 6)),
-                        amountRepaid: Number(formatUnits(loan.amountRepaid, 6)),
+                        principal,
+                        totalRepayment,
+                        amountRepaid,
                         interestRate: Number(loan.interestRate) / 100,
                         duration: Number(loan.duration) / (24 * 60 * 60),
                         startDate: startDate ? startDate.toISOString().split('T')[0] : '',
