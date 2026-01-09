@@ -152,6 +152,12 @@ const ValuationSchema = new mongoose.Schema({
     default: null
   },
 
+  // NFT Metadata
+  nftMetadata: {
+    uri: String,         // IPFS URI for metadata JSON
+    hash: String         // IPFS hash
+  },
+
   expiresAt: {
     type: Date,
     required: true,

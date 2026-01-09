@@ -1,6 +1,7 @@
 const gptService = require('../services/gptService');
 const pricingService = require('../services/pricingService');
 const ltvCalculator = require('../services/ltvCalculator');
+const metadataService = require('../services/metadataService');
 const { calculateAge } = require('../utils/dateUtils');
 const { calculateAdjustedValue } = require('../utils/depreciation');
 const Valuation = require('../models/Valuation');
@@ -84,9 +85,9 @@ async function createValuation(req, res) {
     const valuation = calculateAdjustedValue(asset, ageInYears, aiAssessment.conditionScore);
 
     console.log(`   Age: ${ageInYears.toFixed(2)} years`);
-    console.log(`   Market Value: ₦${valuation.currentMarketValue.toLocaleString()}`);
-    console.log(`   Depreciated: ₦${valuation.depreciatedValue.toLocaleString()}`);
-    console.log(`   After Condition: ₦${valuation.conditionAdjustedValue.toLocaleString()}`);
+    console.log(`   Market Value: $${valuation.currentMarketValue.toLocaleString()}`);
+    console.log(`   Depreciated: $${valuation.depreciatedValue.toLocaleString()}`);
+    console.log(`   After Condition: $${valuation.conditionAdjustedValue.toLocaleString()}`);
 
     // Step 4: Calculate LTV
     console.log('💰 Calculating LTV...');
@@ -98,14 +99,68 @@ async function createValuation(req, res) {
     const recommendedTerms = ltvCalculator.getRecommendedTerms(asset, ltvResult.finalLTV);
 
     console.log(`   LTV: ${ltvResult.finalLTVPercent}`);
-    console.log(`   Max Loan: ₦${maxLoanAmount.toLocaleString()}`);
+    console.log(`   Max Loan: $${maxLoanAmount.toLocaleString()} USDT`);
 
     // Step 5: Generate valuation ID and set expiry
     const valuationId = `val_${crypto.randomBytes(8).toString('hex')}`;
     const timestamp = new Date().toISOString();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours
 
-    // Step 6: Construct response
+    // Step 6: Generate NFT metadata and upload to IPFS
+    console.log('🎨 Generating NFT metadata...');
+    let metadataUri = '';
+    let metadataHash = '';
+
+    try {
+      const metadataResult = await metadataService.generateAndUploadMetadata({
+        asset: {
+          type: asset.type,
+          brand: asset.brand,
+          model: asset.model,
+          variant: asset.variant,
+          detectedModel: aiAssessment.detectedModel,
+          confirmedMatch: aiAssessment.matches
+        },
+        valuation: {
+          originalPrice: valuation.originalPrice,
+          currentMarketValue: valuation.currentMarketValue,
+          depreciatedValue: valuation.depreciatedValue,
+          conditionAdjustedValue: valuation.conditionAdjustedValue,
+          finalValue: valuation.conditionAdjustedValue,
+          currency: valuation.currency
+        },
+        condition: {
+          rating: aiAssessment.physicalCondition,
+          score: aiAssessment.conditionScore,
+          notes: aiAssessment.damageNotes,
+          confidence: aiAssessment.confidence,
+          redFlags: aiAssessment.redFlags || []
+        },
+        loanTerms: {
+          maxLTV: ltvResult.ltvBasisPoints,
+          maxLTVPercent: ltvResult.finalLTVPercent,
+          maxLoanAmount: maxLoanAmount,
+          recommendedDuration: recommendedTerms.recommendedDuration,
+          recommendedRate: recommendedTerms.recommendedInterestRate
+        },
+        metadata: {
+          timestamp,
+          expiresAt,
+          validFor: '24 hours',
+          assetAge: `${ageInYears.toFixed(2)} years`
+        },
+        images
+      });
+
+      metadataUri = metadataResult.metadataUri;
+      metadataHash = metadataResult.metadataHash;
+      console.log('✅ NFT metadata generated:', metadataUri);
+    } catch (metadataError) {
+      console.error('⚠️  Failed to generate metadata:', metadataError.message);
+      // Continue without metadata - not a critical failure
+    }
+
+    // Step 7: Construct response
     const response = {
       success: true,
       valuationId,
@@ -116,6 +171,10 @@ async function createValuation(req, res) {
         brand: asset.brand,
         model: asset.model,
         variant: asset.variant
+      },
+      nftMetadata: {
+        uri: metadataUri,
+        hash: metadataHash
       },
       valuation: {
         ...valuation,
@@ -207,6 +266,10 @@ async function createValuation(req, res) {
           assetLiquidity: asset.liquidity,
           marketDemand: asset.marketDemand,
           overallRisk: ltvResult.finalLTV < 0.4 ? 'low' : ltvResult.finalLTV < 0.6 ? 'medium' : 'high'
+        },
+        nftMetadata: {
+          uri: metadataUri,
+          hash: metadataHash
         },
         status: 'pending',
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours

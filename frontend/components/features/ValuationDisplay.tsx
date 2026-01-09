@@ -183,13 +183,16 @@ export function ValuationDisplay({ valuation, isLoading, assetData }: ValuationD
             const aiValuationAmount = valuation.valuation.conditionAdjustedValue; // Raw value
             const maxLTV = valuation.loanTerms.maxLTV; // Basis points
             const interestRate = valuation.loanTerms.recommendedInterestRate || 1000;
-            const tokenURI = `ipfs://valuation/${valuation.valuationId}`;
+
+            // Use the NFT metadata URI from backend (includes all asset details, AI assessment, etc.)
+            const tokenURI = valuation.nftMetadata?.uri || `ipfs://valuation/${valuation.valuationId}`;
 
             console.log('📝 Lazy minting params:', {
                 assetType: assetData.assetType || 'smartphone',
                 aiValuation: aiValuationAmount,
                 maxLTV,
                 uri: tokenURI,
+                metadataSource: valuation.nftMetadata?.uri ? 'backend' : 'fallback',
                 principal: customPrincipal,
                 interestRate,
                 duration: customDuration,

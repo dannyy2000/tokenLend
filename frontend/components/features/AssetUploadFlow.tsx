@@ -27,6 +27,10 @@ interface ValuationResult {
         type: string;
         brand: string;
     };
+    nftMetadata: {
+        uri: string;
+        hash: string;
+    };
     valuation: {
         currentMarketValue: number;
         depreciatedValue: number;
@@ -121,6 +125,10 @@ export function AssetUploadFlow() {
                     confirmedMatch: true,
                     type: details.assetType,
                     brand: details.brand,
+                },
+                nftMetadata: {
+                    uri: '',  // Empty for demo mode
+                    hash: ''
                 },
                 valuation: {
                     currentMarketValue: 650000,
