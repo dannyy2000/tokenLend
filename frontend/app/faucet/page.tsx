@@ -5,10 +5,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useFaucet } from '@/lib/hooks';
 import { useAccount } from 'wagmi';
-import { Coins, CheckCircle2, AlertCircle, Loader2, Sparkles } from 'lucide-react';
+import { Coins, CheckCircle2, AlertCircle, Loader2, Sparkles, ArrowLeft, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useRouter } from 'next/navigation';
 
 export default function FaucetPage() {
+    const router = useRouter();
     const { address, isConnected } = useAccount();
     const { mintTestUSDT, isPending, isConfirming, isSuccess, isError, error, hash } = useFaucet();
     const [amount, setAmount] = useState(10000);
@@ -32,6 +34,21 @@ export default function FaucetPage() {
     return (
         <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 pt-24 pb-16">
             <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+                {/* Back Button */}
+                <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="mb-6"
+                >
+                    <button
+                        onClick={() => router.back()}
+                        className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors group"
+                    >
+                        <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+                        <span>Back</span>
+                    </button>
+                </motion.div>
+
                 {/* Header */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -150,27 +167,52 @@ export default function FaucetPage() {
                                         <motion.div
                                             initial={{ opacity: 0, scale: 0.9 }}
                                             animate={{ opacity: 1, scale: 1 }}
-                                            className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg"
+                                            className="space-y-4"
                                         >
-                                            <div className="flex items-start gap-3">
-                                                <CheckCircle2 className="w-6 h-6 text-green-500 flex-shrink-0 mt-0.5" />
-                                                <div className="flex-1">
-                                                    <p className="font-semibold text-green-400 mb-1">
-                                                        Success! USDT Received
-                                                    </p>
-                                                    <p className="text-sm text-green-300 mb-2">
-                                                        {amount.toLocaleString()} USDT has been sent to your wallet
-                                                    </p>
-                                                    {hash && (
-                                                        <a
-                                                            href={`https://sepolia.mantlescan.xyz/tx/${hash}`}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="text-xs text-indigo-400 hover:text-indigo-300 underline"
-                                                        >
-                                                            View Transaction
-                                                        </a>
-                                                    )}
+                                            <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+                                                <div className="flex items-start gap-3">
+                                                    <CheckCircle2 className="w-6 h-6 text-green-500 flex-shrink-0 mt-0.5" />
+                                                    <div className="flex-1">
+                                                        <p className="font-semibold text-green-400 mb-1">
+                                                            Success! USDT Received
+                                                        </p>
+                                                        <p className="text-sm text-green-300 mb-2">
+                                                            {amount.toLocaleString()} USDT has been sent to your wallet
+                                                        </p>
+                                                        {hash && (
+                                                            <a
+                                                                href={`https://sepolia.mantlescan.xyz/tx/${hash}`}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-xs text-indigo-400 hover:text-indigo-300 underline"
+                                                            >
+                                                                View Transaction
+                                                            </a>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* What's Next Section */}
+                                            <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
+                                                <p className="font-semibold text-white mb-3">What's Next?</p>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <Button
+                                                        variant="outline"
+                                                        onClick={() => router.push('/lend')}
+                                                        className="w-full flex items-center justify-center gap-2"
+                                                    >
+                                                        Fund Loans
+                                                        <ArrowRight className="w-4 h-4" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="outline"
+                                                        onClick={() => router.push('/borrow')}
+                                                        className="w-full flex items-center justify-center gap-2"
+                                                    >
+                                                        Borrow
+                                                        <ArrowRight className="w-4 h-4" />
+                                                    </Button>
                                                 </div>
                                             </div>
                                         </motion.div>

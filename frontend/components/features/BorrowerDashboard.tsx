@@ -8,11 +8,11 @@ import { LoadingButton } from '@/components/ui/Spinner';
 import { useToast, ToastContainer } from '@/components/ui/Toast';
 import { VerificationBadge } from '@/components/ui/VerificationBadge';
 import { formatCurrency, formatDate } from '@/lib/utils/format';
-import { TrendingUp, Wallet, Clock, Plus, AlertCircle, CheckCircle2, XCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { TrendingUp, Wallet, Clock, Plus, AlertCircle, CheckCircle2, XCircle, ShieldAlert, ShieldCheck, Filter, X, SlidersHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import { useAccount, useChainId, usePublicClient } from 'wagmi';
 import { useRepayLoan, useGetUserLoans, useGetAsset } from '@/lib/hooks';
-import { getDefaultStablecoin, getStablecoinDecimals, getContractAddresses, LoanManagerABI } from '@/lib/contracts';
+import { getDefaultStablecoin, getStablecoinDecimals, getContractAddresses, LoanManagerABI, AssetTokenABI } from '@/lib/contracts';
 import { parseUnits, formatUnits } from 'viem';
 import * as loanAPI from '@/lib/api/loans';
 import { checkCanCreateLoan } from '@/lib/api/verification';
@@ -21,6 +21,8 @@ interface Loan {
     id: string;
     assetType: string;
     assetName: string;
+    assetValue: number;
+    ltv: number;
     principal: number;
     totalRepayment: number;
     amountRepaid: number;
@@ -45,6 +47,16 @@ export function BorrowerDashboard() {
     const lastProcessedHash = useRef<string | null>(null);
     const [loans, setLoans] = useState<Loan[]>([]);
     const [isLoadingLoans, setIsLoadingLoans] = useState(true);
+
+    // Filter and sort state
+    const [showFilters, setShowFilters] = useState(false);
+    const [filters, setFilters] = useState({
+        status: 'all',
+        assetType: 'all',
+        minAmount: '',
+        maxAmount: '',
+    });
+    const [sortBy, setSortBy] = useState<'date-new' | 'date-old' | 'amount-high' | 'amount-low' | 'status'>('date-new');
 
     // Verification state
     const [verificationStatus, setVerificationStatus] = useState<{
@@ -150,10 +162,34 @@ export function BorrowerDashboard() {
                     status = 'funded';
                 }
 
+                // Fetch asset data for proper type and LTV
+                let assetType = 'asset';
+                let assetName = `Asset #${loanData.assetTokenId.toString()}`;
+                let assetValue = principal * 2; // Fallback estimate
+                let ltv = 50; // Fallback estimate
+
+                try {
+                    const assetData = await readContract(config, {
+                        address: addresses.assetToken,
+                        abi: AssetTokenABI.abi,
+                        functionName: 'getAsset',
+                        args: [loanData.assetTokenId],
+                    }) as any;
+
+                    assetType = assetData.assetType || 'asset';
+                    assetName = `${assetData.assetType || 'Asset'} #${loanData.assetTokenId.toString()}`;
+                    assetValue = Number(formatUnits(assetData.aiValuation, 18));
+                    ltv = assetValue > 0 ? (principal / assetValue) * 100 : 0;
+                } catch (err) {
+                    console.error(`Failed to fetch asset data for loan ${loanId}:`, err);
+                }
+
                 return {
                     id: loanId.toString(),
-                    assetType: 'asset',
-                    assetName: `Asset #${loanData.assetTokenId.toString()}`,
+                    assetType,
+                    assetName,
+                    assetValue,
+                    ltv,
                     principal,
                     totalRepayment,
                     amountRepaid,
@@ -184,6 +220,70 @@ export function BorrowerDashboard() {
         checkVerification();
         fetchLoans();
     }, [address]);
+
+    // Filter and sort loans (active + pending only)
+    const filteredAndSortedLoans = (() => {
+        // Only show active and funded loans in the main view
+        let filtered = loans.filter(loan => loan.status === 'active' || loan.status === 'funded');
+
+        // Apply filters
+        if (filters.status !== 'all') {
+            filtered = filtered.filter(loan => loan.status === filters.status);
+        }
+
+        if (filters.assetType !== 'all') {
+            filtered = filtered.filter(loan => loan.assetType.toLowerCase() === filters.assetType.toLowerCase());
+        }
+
+        if (filters.minAmount) {
+            filtered = filtered.filter(loan => loan.principal >= Number(filters.minAmount));
+        }
+
+        if (filters.maxAmount) {
+            filtered = filtered.filter(loan => loan.principal <= Number(filters.maxAmount));
+        }
+
+        // Apply sorting
+        filtered.sort((a, b) => {
+            switch (sortBy) {
+                case 'date-new':
+                    return new Date(b.startDate || '').getTime() - new Date(a.startDate || '').getTime();
+                case 'date-old':
+                    return new Date(a.startDate || '').getTime() - new Date(b.startDate || '').getTime();
+                case 'amount-high':
+                    return b.principal - a.principal;
+                case 'amount-low':
+                    return a.principal - b.principal;
+                case 'status':
+                    const statusOrder = { active: 0, funded: 1, repaid: 2, defaulted: 3 };
+                    return (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99);
+                default:
+                    return 0;
+            }
+        });
+
+        return filtered;
+    })();
+
+    // Transaction history (completed loans - repaid or defaulted)
+    const transactionHistory = loans
+        .filter(loan => loan.status === 'repaid' || loan.status === 'defaulted')
+        .sort((a, b) => new Date(b.startDate || '').getTime() - new Date(a.startDate || '').getTime());
+
+    const clearFilters = () => {
+        setFilters({
+            status: 'all',
+            assetType: 'all',
+            minAmount: '',
+            maxAmount: '',
+        });
+    };
+
+    const hasActiveFilters = () => {
+        return filters.status !== 'all' ||
+               filters.assetType !== 'all' ||
+               filters.minAmount || filters.maxAmount;
+    };
 
     const stats = {
         totalBorrowed: loans.filter((l) => l.status === 'funded' || l.status === 'repaid').reduce((sum, loan) => sum + loan.principal, 0),
@@ -456,7 +556,148 @@ export function BorrowerDashboard() {
 
             {/* Loans List */}
             <div className="space-y-4">
-                <h2 className="text-2xl font-bold text-white">Your Loans</h2>
+                <div className="flex items-center justify-between">
+                    <h2 className="text-2xl font-bold text-white">Your Loans</h2>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowFilters(!showFilters)}
+                            className={hasActiveFilters() ? 'border-indigo-500/50 bg-indigo-500/10' : ''}
+                        >
+                            <SlidersHorizontal className="w-4 h-4 mr-2" />
+                            Filters
+                            {hasActiveFilters() && (
+                                <span className="ml-2 px-1.5 py-0.5 text-xs bg-indigo-500 text-white rounded-full">
+                                    •
+                                </span>
+                            )}
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => fetchLoans()}>
+                            Refresh
+                        </Button>
+                    </div>
+                </div>
+
+                {/* Filter Panel */}
+                {showFilters && (
+                    <Card variant="glass" className="border-indigo-500/30">
+                        <CardContent className="p-6">
+                            <div className="space-y-6">
+                                {/* Filter Header */}
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Filter className="w-5 h-5 text-indigo-400" />
+                                        <h3 className="text-lg font-semibold text-white">Filter & Sort Loans</h3>
+                                    </div>
+                                    {hasActiveFilters() && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={clearFilters}
+                                            className="text-gray-400 hover:text-white"
+                                        >
+                                            <X className="w-4 h-4 mr-1" />
+                                            Clear All
+                                        </Button>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {/* Sort By */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                                            Sort By
+                                        </label>
+                                        <select
+                                            value={sortBy}
+                                            onChange={(e) => setSortBy(e.target.value as any)}
+                                            className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <option value="date-new">Newest First</option>
+                                            <option value="date-old">Oldest First</option>
+                                            <option value="amount-high">Amount: High to Low</option>
+                                            <option value="amount-low">Amount: Low to High</option>
+                                            <option value="status">Status</option>
+                                        </select>
+                                    </div>
+
+                                    {/* Status Filter */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                                            Status
+                                        </label>
+                                        <select
+                                            value={filters.status}
+                                            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                                            className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <option value="all">All Statuses</option>
+                                            <option value="active">Pending Funding</option>
+                                            <option value="funded">Active/Funded</option>
+                                            <option value="repaid">Repaid</option>
+                                            <option value="defaulted">Defaulted</option>
+                                        </select>
+                                    </div>
+
+                                    {/* Asset Type */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                                            Asset Type
+                                        </label>
+                                        <select
+                                            value={filters.assetType}
+                                            onChange={(e) => setFilters({ ...filters, assetType: e.target.value })}
+                                            className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <option value="all">All Asset Types</option>
+                                            <option value="car">Car</option>
+                                            <option value="phone">Phone</option>
+                                            <option value="laptop">Laptop</option>
+                                            <option value="machinery">Machinery</option>
+                                            <option value="asset">Other Asset</option>
+                                        </select>
+                                    </div>
+
+                                    {/* Loan Amount Range */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                                            Loan Amount (USDT)
+                                        </label>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="number"
+                                                placeholder="Min"
+                                                value={filters.minAmount}
+                                                onChange={(e) => setFilters({ ...filters, minAmount: e.target.value })}
+                                                className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                            <span className="text-gray-500">-</span>
+                                            <input
+                                                type="number"
+                                                placeholder="Max"
+                                                value={filters.maxAmount}
+                                                onChange={(e) => setFilters({ ...filters, maxAmount: e.target.value })}
+                                                className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Results Count */}
+                                    <div className="flex items-end md:col-span-2 lg:col-span-1">
+                                        <div className="w-full p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
+                                            <p className="text-sm text-gray-400">Showing Results</p>
+                                            <p className="text-2xl font-bold text-white">
+                                                {filteredAndSortedLoans.length} / {loans.length}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
+
                 {isLoadingLoans ? (
                     <Card variant="glass" className="text-center py-16">
                         <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-500 mx-auto mb-4"></div>
@@ -484,8 +725,17 @@ export function BorrowerDashboard() {
                             </Link>
                         )}
                     </Card>
+                ) : filteredAndSortedLoans.length === 0 ? (
+                    <Card variant="glass" className="text-center py-16">
+                        <AlertCircle className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                        <h3 className="text-xl font-bold text-white mb-2">No Loans Match Your Filters</h3>
+                        <p className="text-gray-400 mb-4">Try adjusting your filter criteria</p>
+                        <Button variant="outline" size="sm" onClick={clearFilters}>
+                            Clear Filters
+                        </Button>
+                    </Card>
                 ) : (
-                    loans.map((loan) => (
+                    filteredAndSortedLoans.map((loan) => (
                         <Card key={loan.id} variant="glass" className="hover:border-indigo-500/50 transition-colors">
                             <CardContent className="p-6">
                                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -587,6 +837,98 @@ export function BorrowerDashboard() {
                     ))
                 )}
             </div>
+
+            {/* Transaction History */}
+            {transactionHistory.length > 0 && (
+                <div className="space-y-4 mt-12">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-2xl font-bold text-white">Transaction History</h2>
+                            <p className="text-gray-400 text-sm mt-1">Completed and past loans</p>
+                        </div>
+                        <div className="text-sm text-gray-400">
+                            {transactionHistory.length} {transactionHistory.length === 1 ? 'transaction' : 'transactions'}
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        {transactionHistory.map((loan) => (
+                            <Card key={loan.id} variant="glass" className="opacity-80 hover:opacity-100 transition-opacity">
+                                <CardContent className="p-5">
+                                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                                        {/* Left: Asset Info */}
+                                        <div className="flex-1">
+                                            <div className="flex items-center space-x-3 mb-2">
+                                                <h3 className="text-lg font-semibold text-white">{loan.assetName}</h3>
+                                                <span
+                                                    className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusColor(
+                                                        loan.status
+                                                    )}`}
+                                                >
+                                                    {getStatusIcon(loan.status)}
+                                                    <span className="capitalize">{loan.status}</span>
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-3 text-sm text-gray-400">
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <span className="text-gray-500">Principal:</span>
+                                                    <span className="font-semibold text-white">{formatCurrency(loan.principal)}</span>
+                                                </span>
+                                                <span className="text-gray-600">•</span>
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <span className="text-gray-500">Total Repaid:</span>
+                                                    <span className="font-semibold text-white">{formatCurrency(loan.amountRepaid)}</span>
+                                                </span>
+                                                <span className="text-gray-600">•</span>
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <span className="text-gray-500">Rate:</span>
+                                                    <span className="font-semibold text-white">{loan.interestRate}% APR</span>
+                                                </span>
+                                                <span className="text-gray-600">•</span>
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <span className="text-gray-500">Duration:</span>
+                                                    <span className="font-semibold text-white">{loan.duration} days</span>
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Right: Summary */}
+                                        <div className="flex flex-col items-end space-y-2">
+                                            {loan.status === 'repaid' && (
+                                                <div className="text-right">
+                                                    <p className="text-xs text-gray-500 mb-1">Loan Completed</p>
+                                                    <p className="text-sm font-semibold text-green-400">
+                                                        ✓ Fully Repaid
+                                                    </p>
+                                                    <p className="text-xs text-gray-400 mt-1">
+                                                        Due: {formatDate(loan.dueDate)}
+                                                    </p>
+                                                </div>
+                                            )}
+                                            {loan.status === 'defaulted' && (
+                                                <div className="text-right">
+                                                    <p className="text-xs text-gray-500 mb-1">Loan Status</p>
+                                                    <p className="text-sm font-semibold text-red-400">
+                                                        ⚠ Defaulted
+                                                    </p>
+                                                    <p className="text-xs text-gray-400 mt-1">
+                                                        Due: {formatDate(loan.dueDate)}
+                                                    </p>
+                                                </div>
+                                            )}
+                                            <Link href={`/borrow/loan/${loan.id}`}>
+                                                <Button size="sm" variant="outline">
+                                                    View Details
+                                                </Button>
+                                            </Link>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Repayment Modal */}
             <Modal
