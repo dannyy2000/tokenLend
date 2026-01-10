@@ -15,3 +15,4 @@ export { useFaucet } from './useFaucet';
 export { useGetLoan, useGetLoanCount, useGetUserLoans, useGetLoanStatus } from './useGetLoans';
 export { useGetAvailableLoans, useGetLenderLoans, useGetBorrowerLoans } from './useGetAllLoans';
 export { useGetAsset } from './useGetAsset';
+export { useGetUSDTBalance } from './useGetUSDTBalance';

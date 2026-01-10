@@ -13,7 +13,7 @@ import { formatCurrency, formatDate } from '@/lib/utils/format';
 import { TrendingUp, Wallet, DollarSign, AlertCircle, CheckCircle2, Clock, Eye, Info, ShieldCheck, Filter, X, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import { useAccount, useChainId, usePublicClient } from 'wagmi';
-import { useFundLoan } from '@/lib/hooks';
+import { useFundLoan, useGetUSDTBalance } from '@/lib/hooks';
 import { getDefaultStablecoin, getStablecoinDecimals, getContractAddresses, LoanManagerABI, AssetTokenABI } from '@/lib/contracts';
 import { parseUnits } from 'viem';
 import * as loanAPI from '@/lib/api/loans';
@@ -97,6 +97,9 @@ export function LenderDashboard() {
         hash,
         error,
     } = useFundLoan();
+
+    // Get USDT balance
+    const { balance: usdtBalance, isLoading: isLoadingBalance } = useGetUSDTBalance();
 
     // Fetch available loans from blockchain
     const fetchAvailableLoans = async () => {
@@ -597,7 +600,26 @@ export function LenderDashboard() {
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+                <Card variant="gradient" className="border-emerald-500/20">
+                    <CardHeader>
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-sm">USDT Balance</CardTitle>
+                            <Wallet className="w-5 h-5 text-emerald-400" />
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        {isLoadingBalance ? (
+                            <div className="flex items-center gap-2">
+                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-emerald-500"></div>
+                                <p className="text-sm text-gray-400">Loading...</p>
+                            </div>
+                        ) : (
+                            <p className="text-2xl font-bold text-white">{formatCurrency(usdtBalance)}</p>
+                        )}
+                    </CardContent>
+                </Card>
+
                 <Card variant="gradient">
                     <CardHeader>
                         <div className="flex items-center justify-between">
